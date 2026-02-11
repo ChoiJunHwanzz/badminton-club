@@ -16,7 +16,10 @@ import {
   Plus,
   Minus,
   Save,
-  Loader2
+  Loader2,
+  CheckCircle,
+  Circle,
+  Edit3
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 import { Member, MemberGender } from '@/types/database'
@@ -44,6 +47,9 @@ interface Attendee {
   lastMatchRound: number
 }
 
+// 매치 상태
+type MatchStatus = 'scheduled' | 'playing' | 'completed'
+
 // 생성된 매치 타입
 interface GeneratedMatch {
   round: number
@@ -51,6 +57,7 @@ interface GeneratedMatch {
   team1: [Attendee, Attendee]
   team2: [Attendee, Attendee]
   matchType: 'men' | 'women' | 'mixed'
+  status: MatchStatus
 }
 
 // 오늘 날짜 (YYYY-MM-DD)
@@ -90,6 +97,14 @@ export default function MatchesPage() {
   // 대진표
   const [matches, setMatches] = useState<GeneratedMatch[]>([])
   const [currentRound, setCurrentRound] = useState(0)
+
+  // 선수 교체 모달
+  const [editingMatch, setEditingMatch] = useState<{
+    round: number
+    court: number
+    team: 'team1' | 'team2'
+    position: 0 | 1
+  } | null>(null)
 
   // 자동 저장 타이머
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -435,7 +450,7 @@ export default function MatchesPage() {
         team2 = [selectedPlayers[1], selectedPlayers[2]]
       }
 
-      const match: GeneratedMatch = { round: nextRound, court, team1, team2, matchType }
+      const match: GeneratedMatch = { round: nextRound, court, team1, team2, matchType, status: 'scheduled' }
       newMatches.push(match)
 
       ;[...team1, ...team2].forEach(p => {
@@ -478,6 +493,67 @@ export default function MatchesPage() {
 
     // 즉시 저장
     await saveSession(resetAttendees, [], 0)
+  }
+
+  // 경기 상태 변경
+  const toggleMatchStatus = (round: number, court: number) => {
+    const updated = matches.map(m => {
+      if (m.round === round && m.court === court) {
+        const nextStatus: MatchStatus =
+          m.status === 'scheduled' ? 'playing' :
+          m.status === 'playing' ? 'completed' : 'scheduled'
+        return { ...m, status: nextStatus }
+      }
+      return m
+    })
+    setMatches(updated)
+    scheduleAutoSave(undefined, updated)
+  }
+
+  // 선수 교체
+  const swapPlayer = (newPlayerId: string) => {
+    if (!editingMatch) return
+
+    const { round, court, team, position } = editingMatch
+    const newPlayer = attendees.find(a => a.id === newPlayerId)
+    if (!newPlayer) return
+
+    const updated = matches.map(m => {
+      if (m.round === round && m.court === court) {
+        const newMatch = { ...m }
+        const oldPlayer = newMatch[team][position]
+
+        // 새 선수가 이미 이 경기에 있는지 확인
+        const allPlayers = [...newMatch.team1, ...newMatch.team2]
+        if (allPlayers.some(p => p.id === newPlayerId)) {
+          alert('이미 이 경기에 참여 중인 선수입니다.')
+          return m
+        }
+
+        // 선수 교체
+        newMatch[team] = [...newMatch[team]] as [Attendee, Attendee]
+        newMatch[team][position] = newPlayer
+
+        // 게임 수 업데이트 (이전 선수 -1, 새 선수 +1)
+        const updatedAttendees = attendees.map(a => {
+          if (a.id === oldPlayer.id) {
+            return { ...a, gamesPlayed: Math.max(0, a.gamesPlayed - 1) }
+          }
+          if (a.id === newPlayerId) {
+            return { ...a, gamesPlayed: a.gamesPlayed + 1 }
+          }
+          return a
+        })
+        setAttendees(updatedAttendees)
+
+        return newMatch
+      }
+      return m
+    })
+
+    setMatches(updated)
+    setEditingMatch(null)
+    scheduleAutoSave(undefined, updated)
   }
 
   // 통계
@@ -693,7 +769,9 @@ export default function MatchesPage() {
                         <div
                           key={`${match.round}-${match.court}`}
                           className={`
-                            p-3 rounded-lg border
+                            p-3 rounded-lg border relative
+                            ${match.status === 'playing' ? 'ring-2 ring-yellow-400' : ''}
+                            ${match.status === 'completed' ? 'opacity-50' : ''}
                             ${match.matchType === 'men'
                               ? 'bg-blue-900/30 border-blue-700/50'
                               : match.matchType === 'women'
@@ -702,9 +780,30 @@ export default function MatchesPage() {
                           `}
                         >
                           <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-medium text-slate-400">
-                              코트 {match.court}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => toggleMatchStatus(match.round, match.court)}
+                                className={`p-1 rounded transition-colors ${
+                                  match.status === 'completed'
+                                    ? 'text-green-400 hover:text-green-300'
+                                    : match.status === 'playing'
+                                    ? 'text-yellow-400 hover:text-yellow-300'
+                                    : 'text-slate-500 hover:text-slate-300'
+                                }`}
+                                title={match.status === 'scheduled' ? '대기' : match.status === 'playing' ? '진행중' : '완료'}
+                              >
+                                {match.status === 'completed' ? (
+                                  <CheckCircle size={16} />
+                                ) : match.status === 'playing' ? (
+                                  <Play size={16} className="fill-current" />
+                                ) : (
+                                  <Circle size={16} />
+                                )}
+                              </button>
+                              <span className="text-xs font-medium text-slate-400">
+                                코트 {match.court}
+                              </span>
+                            </div>
                             <span className={`
                               text-xs px-2 py-0.5 rounded-full
                               ${match.matchType === 'men'
@@ -718,20 +817,40 @@ export default function MatchesPage() {
                           </div>
 
                           <div className="text-sm text-white">
-                            <div className="mb-1">
-                              {match.team1[0].name}
-                              {match.team1[0].isGuest && <span className="text-orange-400">*</span>}
-                              <span className="text-slate-500 mx-1">&</span>
-                              {match.team1[1].name}
-                              {match.team1[1].isGuest && <span className="text-orange-400">*</span>}
+                            <div className="mb-1 flex items-center gap-1">
+                              <button
+                                onClick={() => setEditingMatch({ round: match.round, court: match.court, team: 'team1', position: 0 })}
+                                className="hover:text-blue-300 transition-colors"
+                              >
+                                {match.team1[0].name}
+                                {match.team1[0].isGuest && <span className="text-orange-400">*</span>}
+                              </button>
+                              <span className="text-slate-500">&</span>
+                              <button
+                                onClick={() => setEditingMatch({ round: match.round, court: match.court, team: 'team1', position: 1 })}
+                                className="hover:text-blue-300 transition-colors"
+                              >
+                                {match.team1[1].name}
+                                {match.team1[1].isGuest && <span className="text-orange-400">*</span>}
+                              </button>
                             </div>
                             <div className="text-center text-xs text-slate-500 my-1">VS</div>
-                            <div>
-                              {match.team2[0].name}
-                              {match.team2[0].isGuest && <span className="text-orange-400">*</span>}
-                              <span className="text-slate-500 mx-1">&</span>
-                              {match.team2[1].name}
-                              {match.team2[1].isGuest && <span className="text-orange-400">*</span>}
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => setEditingMatch({ round: match.round, court: match.court, team: 'team2', position: 0 })}
+                                className="hover:text-blue-300 transition-colors"
+                              >
+                                {match.team2[0].name}
+                                {match.team2[0].isGuest && <span className="text-orange-400">*</span>}
+                              </button>
+                              <span className="text-slate-500">&</span>
+                              <button
+                                onClick={() => setEditingMatch({ round: match.round, court: match.court, team: 'team2', position: 1 })}
+                                className="hover:text-blue-300 transition-colors"
+                              >
+                                {match.team2[1].name}
+                                {match.team2[1].isGuest && <span className="text-orange-400">*</span>}
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -954,6 +1073,67 @@ export default function MatchesPage() {
                 저장
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 선수 교체 모달 */}
+      {editingMatch && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-800 rounded-xl shadow-2xl p-6 w-full max-w-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Edit3 size={20} />
+                선수 교체
+              </h3>
+              <button
+                onClick={() => setEditingMatch(null)}
+                className="p-1 text-slate-400 hover:text-white"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-slate-400 mb-4">
+              교체할 선수를 선택하세요
+            </p>
+            <div className="max-h-60 overflow-y-auto space-y-1">
+              {attendees
+                .filter(a => {
+                  // 현재 경기에 참여 중인 선수 제외
+                  const currentMatch = matches.find(
+                    m => m.round === editingMatch.round && m.court === editingMatch.court
+                  )
+                  if (!currentMatch) return true
+                  const allPlayers = [...currentMatch.team1, ...currentMatch.team2]
+                  return !allPlayers.some(p => p.id === a.id)
+                })
+                .map(a => (
+                  <button
+                    key={a.id}
+                    onClick={() => swapPlayer(a.id)}
+                    className={`
+                      w-full text-left p-2 rounded-lg transition-colors
+                      ${a.isGuest ? 'bg-orange-900/30 hover:bg-orange-900/50' : 'bg-slate-700/50 hover:bg-slate-700'}
+                    `}
+                  >
+                    <span className={`text-sm font-medium ${a.gender === 'male' ? 'text-blue-300' : 'text-pink-300'}`}>
+                      {a.name}
+                    </span>
+                    <span className="text-xs text-slate-400 ml-2">
+                      ({a.gamesPlayed}게임)
+                    </span>
+                    {a.isGuest && (
+                      <span className="text-[10px] px-1.5 py-0.5 bg-orange-600/50 text-orange-300 rounded ml-1">G</span>
+                    )}
+                  </button>
+                ))}
+            </div>
+            <button
+              onClick={() => setEditingMatch(null)}
+              className="w-full mt-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+            >
+              취소
+            </button>
           </div>
         </div>
       )}
