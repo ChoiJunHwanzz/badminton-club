@@ -12,6 +12,9 @@ export type MemberRole = 'leader' | 'advisor' | 'staff' | 'member'
 // 실력: 랠리X, 랠리O, 왕초심, 초심, D조, C조, B조, A조
 export type MemberLevel = 'rally_x' | 'rally_o' | 'very_beginner' | 'beginner' | 'd_class' | 'c_class' | 'b_class' | 'a_class'
 
+// 성별
+export type MemberGender = 'male' | 'female'
+
 // 상태: 활동, 탈퇴, 강퇴
 export type MemberStatus = 'active' | 'left' | 'kicked'
 
@@ -27,6 +30,7 @@ export interface Database {
           join_date: string
           phone: string | null
           level: MemberLevel
+          gender: MemberGender
           status: MemberStatus
           email: string | null
           note: string | null
@@ -41,6 +45,7 @@ export interface Database {
           join_date?: string
           phone?: string | null
           level?: MemberLevel
+          gender?: MemberGender
           status?: MemberStatus
           email?: string | null
           note?: string | null
@@ -55,6 +60,7 @@ export interface Database {
           join_date?: string
           phone?: string | null
           level?: MemberLevel
+          gender?: MemberGender
           status?: MemberStatus
           email?: string | null
           note?: string | null
@@ -285,6 +291,7 @@ export interface Database {
     Enums: {
       member_role: MemberRole
       member_level: MemberLevel
+      member_gender: MemberGender
       member_status: MemberStatus
       payment_status: 'paid' | 'unpaid' | 'partial'
       payment_method: 'cash' | 'transfer' | 'card'
