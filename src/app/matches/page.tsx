@@ -12,8 +12,6 @@ import {
   Settings,
   Clock,
   Trophy,
-  ChevronUp,
-  ChevronDown,
   RotateCcw,
   Plus,
   Minus,
@@ -288,19 +286,28 @@ export default function MatchesPage() {
     scheduleAutoSave(reranked)
   }
 
-  // 순위 변경
-  const moveRank = (id: string, direction: 'up' | 'down') => {
-    const idx = attendees.findIndex(a => a.id === id)
-    if (idx === -1) return
-    if (direction === 'up' && idx === 0) return
-    if (direction === 'down' && idx === attendees.length - 1) return
+  // 순위 직접 변경
+  const updateRank = (id: string, newRank: number) => {
+    if (newRank < 1 || newRank > attendees.length) return
+
+    const currentIdx = attendees.findIndex(a => a.id === id)
+    if (currentIdx === -1) return
 
     const newAttendees = [...attendees]
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
-    ;[newAttendees[idx], newAttendees[swapIdx]] = [newAttendees[swapIdx], newAttendees[idx]]
+    const [moved] = newAttendees.splice(currentIdx, 1)
+    newAttendees.splice(newRank - 1, 0, moved)
     const reranked = newAttendees.map((a, i) => ({ ...a, rank: i + 1 }))
     setAttendees(reranked)
     scheduleAutoSave(reranked)
+  }
+
+  // 성별 변경
+  const updateGender = (id: string, gender: MemberGender) => {
+    const updated = attendees.map(a =>
+      a.id === id ? { ...a, gender } : a
+    )
+    setAttendees(updated)
+    scheduleAutoSave(updated)
   }
 
   // 지각 토글
@@ -473,7 +480,7 @@ export default function MatchesPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-900 -m-4 md:-m-6 p-4 md:p-6 flex items-center justify-center">
+      <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center">
         <div className="text-center">
           <Loader2 size={48} className="animate-spin text-blue-500 mx-auto mb-4" />
           <p className="text-slate-400">불러오는 중...</p>
@@ -483,7 +490,7 @@ export default function MatchesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 -m-4 md:-m-6 p-4 md:p-6">
+    <div className="min-h-[calc(100vh-4rem)]">
       {/* 헤더 */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
@@ -536,7 +543,7 @@ export default function MatchesPage() {
                 설정에서 참석자를 추가하세요
               </div>
             ) : (
-              attendees.map((a, idx) => (
+              attendees.map((a) => (
                 <div
                   key={a.id}
                   className={`
@@ -545,24 +552,7 @@ export default function MatchesPage() {
                     ${a.isLate ? 'opacity-50' : ''}
                   `}
                 >
-                  <div className="flex flex-col items-center">
-                    <button
-                      onClick={() => moveRank(a.id, 'up')}
-                      className="text-slate-500 hover:text-white p-0.5"
-                      disabled={idx === 0}
-                    >
-                      <ChevronUp size={14} />
-                    </button>
-                    <span className="text-xs font-bold text-blue-400 w-5 text-center">{a.rank}</span>
-                    <button
-                      onClick={() => moveRank(a.id, 'down')}
-                      className="text-slate-500 hover:text-white p-0.5"
-                      disabled={idx === attendees.length - 1}
-                    >
-                      <ChevronDown size={14} />
-                    </button>
-                  </div>
-
+                  {/* 이름 및 게스트 표시 */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className={`text-sm font-medium ${a.gender === 'male' ? 'text-blue-300' : 'text-pink-300'}`}>
@@ -571,13 +561,57 @@ export default function MatchesPage() {
                       {a.isGuest && (
                         <span className="text-[10px] px-1.5 py-0.5 bg-orange-600/50 text-orange-300 rounded">G</span>
                       )}
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-400">
-                      <span>{genderLabels[a.gender]}</span>
-                      {matches.length > 0 && <span>• {a.gamesPlayed}게임</span>}
+                      {matches.length > 0 && (
+                        <span className="text-xs text-slate-400">{a.gamesPlayed}게임</span>
+                      )}
                     </div>
                   </div>
 
+                  {/* 성별 토글 */}
+                  <div className="flex rounded-md overflow-hidden border border-slate-600">
+                    <button
+                      onClick={() => updateGender(a.id, 'male')}
+                      className={`px-2 py-1 text-xs font-medium transition-colors ${
+                        a.gender === 'male'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                      }`}
+                    >
+                      남
+                    </button>
+                    <button
+                      onClick={() => updateGender(a.id, 'female')}
+                      className={`px-2 py-1 text-xs font-medium transition-colors ${
+                        a.gender === 'female'
+                          ? 'bg-pink-600 text-white'
+                          : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                      }`}
+                    >
+                      여
+                    </button>
+                  </div>
+
+                  {/* 순위 입력 */}
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    className="w-10 text-center bg-slate-700 border border-slate-600 text-blue-400 font-bold rounded py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    defaultValue={a.rank}
+                    key={`rank-${a.id}-${a.rank}`}
+                    onBlur={(e) => {
+                      const val = e.target.value.replace(/[^0-9]/g, '')
+                      if (val && Number(val) !== a.rank) {
+                        updateRank(a.id, Number(val))
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.currentTarget.blur()
+                      }
+                    }}
+                  />
+
+                  {/* 지각 버튼 */}
                   <button
                     onClick={() => toggleLate(a.id)}
                     className={`p-1.5 rounded ${a.isLate ? 'bg-yellow-600/50 text-yellow-300' : 'text-slate-500 hover:text-yellow-400'}`}
@@ -585,6 +619,8 @@ export default function MatchesPage() {
                   >
                     <Clock size={14} />
                   </button>
+
+                  {/* 삭제 버튼 */}
                   <button
                     onClick={() => removeAttendee(a.id)}
                     className="p-1.5 text-slate-500 hover:text-red-400"
@@ -864,7 +900,7 @@ export default function MatchesPage() {
                     </div>
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
-                    * 순위는 참석자 목록에서 위/아래 버튼으로 조정
+                    * 순위는 참석자 목록에서 숫자 입력으로 조정
                   </p>
                 </div>
               )}

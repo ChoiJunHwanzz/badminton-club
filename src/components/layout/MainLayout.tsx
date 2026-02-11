@@ -45,6 +45,9 @@ export default function MainLayout({ children }: MainLayoutProps) {
     return <>{children}</>
   }
 
+  // 다크 테마 페이지 여부
+  const isDarkPage = pathname === '/matches'
+
   // 일반 페이지는 사이드바 + 헤더 + AuthGuard 적용
   return (
     <AuthGuard>
@@ -59,7 +62,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
             onMenuClick={toggleSidebar}
             isMobile={isMobile}
           />
-          <main className="flex-1 p-4 md:p-6 bg-gray-50 overflow-auto">
+          <main className={`flex-1 p-4 md:p-6 overflow-auto ${isDarkPage ? 'bg-slate-900' : 'bg-gray-50'}`}>
             {children}
           </main>
         </div>
