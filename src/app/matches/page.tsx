@@ -8,39 +8,19 @@ import {
   UserPlus,
   Search,
   X,
-  Shuffle,
+  Play,
+  Settings,
   Clock,
   Trophy,
-  ChevronDown,
+  GripVertical,
   ChevronUp,
-  RotateCcw
+  ChevronDown,
+  RotateCcw,
+  Plus,
+  Minus
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
-import { Member, MemberLevel, MemberGender } from '@/types/database'
-
-// 실력 라벨
-const levelLabels: Record<MemberLevel, string> = {
-  rally_x: '랠리X',
-  rally_o: '랠리O',
-  very_beginner: '왕초심',
-  beginner: '초심',
-  d_class: 'D조',
-  c_class: 'C조',
-  b_class: 'B조',
-  a_class: 'A조',
-}
-
-// 실력 점수 (매칭용)
-const levelScore: Record<MemberLevel, number> = {
-  rally_x: 1,
-  rally_o: 2,
-  very_beginner: 3,
-  beginner: 4,
-  d_class: 5,
-  c_class: 6,
-  b_class: 7,
-  a_class: 8,
-}
+import { Member, MemberGender } from '@/types/database'
 
 // 성별 라벨
 const genderLabels: Record<MemberGender, string> = {
@@ -54,15 +34,15 @@ interface Attendee {
   name: string
   nickname?: string | null
   gender: MemberGender
-  level: MemberLevel
+  rank: number // 실력 순위 (1이 가장 높음)
   isGuest: boolean
   isLate: boolean
-  gamesBeforeArrival: number // 지각 시 도착 전 평균 게임 수
-  gamesPlayed: number // 배정된 게임 수
-  menDoubles: number // 남복 횟수
-  womenDoubles: number // 여복 횟수
-  mixedDoubles: number // 혼복 횟수
-  lastMatchRound: number // 마지막 배정 라운드
+  gamesBeforeArrival: number
+  gamesPlayed: number
+  menDoubles: number
+  womenDoubles: number
+  mixedDoubles: number
+  lastMatchRound: number
 }
 
 // 생성된 매치 타입
@@ -77,11 +57,11 @@ interface GeneratedMatch {
 export default function MatchesPage() {
   const supabase = createClient()
 
-  // 기본 설정
+  // 설정
   const [courtCount, setCourtCount] = useState(2)
-  const [totalGames, setTotalGames] = useState(20)
+  const [showSettingsModal, setShowSettingsModal] = useState(false)
 
-  // 회원 검색
+  // 회원 데이터
   const [members, setMembers] = useState<Member[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
@@ -90,21 +70,20 @@ export default function MatchesPage() {
   // 게스트 입력
   const [guestName, setGuestName] = useState('')
   const [guestGender, setGuestGender] = useState<MemberGender>('male')
-  const [guestLevel, setGuestLevel] = useState<MemberLevel>('beginner')
 
   // 참석자 목록
   const [attendees, setAttendees] = useState<Attendee[]>([])
 
-  // 지각자 설정 모달
+  // 지각자 설정
   const [lateSettingId, setLateSettingId] = useState<string | null>(null)
   const [lateGamesInput, setLateGamesInput] = useState(0)
 
-  // 생성된 대진표
+  // 대진표
   const [matches, setMatches] = useState<GeneratedMatch[]>([])
-  const [isGenerated, setIsGenerated] = useState(false)
+  const [currentRound, setCurrentRound] = useState(0)
 
-  // UI 상태
-  const [showSettings, setShowSettings] = useState(true)
+  // 드래그 상태
+  const [draggedId, setDraggedId] = useState<string | null>(null)
 
   // 회원 목록 조회
   useEffect(() => {
@@ -114,13 +93,12 @@ export default function MatchesPage() {
         .select('*')
         .eq('status', 'active')
         .order('name')
-
       if (data) setMembers(data)
     }
     fetchMembers()
   }, [])
 
-  // 검색 드롭다운 외부 클릭 처리
+  // 검색 드롭다운 외부 클릭
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
@@ -131,7 +109,7 @@ export default function MatchesPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // 회원 검색 결과
+  // 검색 결과
   const filteredMembers = members.filter(m =>
     !attendees.some(a => a.id === m.id) &&
     (m.name.includes(searchTerm) || (m.nickname && m.nickname.includes(searchTerm)))
@@ -144,7 +122,7 @@ export default function MatchesPage() {
       name: member.name,
       nickname: member.nickname,
       gender: member.gender || 'male',
-      level: member.level,
+      rank: attendees.length + 1,
       isGuest: false,
       isLate: false,
       gamesBeforeArrival: 0,
@@ -162,13 +140,12 @@ export default function MatchesPage() {
   // 게스트 추가
   const addGuest = () => {
     if (!guestName.trim()) return
-
     const newAttendee: Attendee = {
       id: `guest_${Date.now()}`,
       name: guestName.trim(),
       nickname: null,
       gender: guestGender,
-      level: guestLevel,
+      rank: attendees.length + 1,
       isGuest: true,
       isLate: false,
       gamesBeforeArrival: 0,
@@ -184,7 +161,26 @@ export default function MatchesPage() {
 
   // 참석자 제거
   const removeAttendee = (id: string) => {
-    setAttendees(attendees.filter(a => a.id !== id))
+    const filtered = attendees.filter(a => a.id !== id)
+    // 순위 재정렬
+    const reranked = filtered.map((a, idx) => ({ ...a, rank: idx + 1 }))
+    setAttendees(reranked)
+  }
+
+  // 순위 변경 (드래그 or 버튼)
+  const moveRank = (id: string, direction: 'up' | 'down') => {
+    const idx = attendees.findIndex(a => a.id === id)
+    if (idx === -1) return
+    if (direction === 'up' && idx === 0) return
+    if (direction === 'down' && idx === attendees.length - 1) return
+
+    const newAttendees = [...attendees]
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    ;[newAttendees[idx], newAttendees[swapIdx]] = [newAttendees[swapIdx], newAttendees[idx]]
+
+    // 순위 재정렬
+    const reranked = newAttendees.map((a, i) => ({ ...a, rank: i + 1 }))
+    setAttendees(reranked)
   }
 
   // 지각 토글
@@ -193,13 +189,11 @@ export default function MatchesPage() {
     if (!attendee) return
 
     if (!attendee.isLate) {
-      // 지각으로 변경 - 게임 수 입력 모달 표시
       setLateSettingId(id)
       setLateGamesInput(0)
     } else {
-      // 지각 해제
       setAttendees(attendees.map(a =>
-        a.id === id ? { ...a, isLate: false, gamesBeforeArrival: 0 } : a
+        a.id === id ? { ...a, isLate: false, gamesBeforeArrival: 0, gamesPlayed: 0 } : a
       ))
     }
   }
@@ -216,161 +210,121 @@ export default function MatchesPage() {
     }
   }
 
-  // 대진표 생성 알고리즘
-  const generateMatches = () => {
+  // 다음 라운드 생성
+  const generateNextRound = () => {
     if (attendees.length < 4) {
       alert('최소 4명 이상이 필요합니다.')
       return
     }
 
-    // 참석자 초기화 (지각자는 gamesPlayed 유지)
-    const players = attendees.map(a => ({
-      ...a,
-      gamesPlayed: a.isLate ? a.gamesBeforeArrival : 0,
-      menDoubles: 0,
-      womenDoubles: 0,
-      mixedDoubles: 0,
-      lastMatchRound: -999,
-    }))
+    const nextRound = currentRound + 1
+    const players = [...attendees]
+    const newMatches: GeneratedMatch[] = []
 
-    const generatedMatches: GeneratedMatch[] = []
-    const totalRounds = Math.ceil(totalGames / courtCount)
+    // 코트 수만큼 매치 생성
+    for (let court = 1; court <= courtCount; court++) {
+      // 이번 라운드에 배정 가능한 선수들
+      const minRestRounds = courtCount >= 2 ? 1 : 0
 
-    for (let round = 1; round <= totalRounds; round++) {
-      const matchesThisRound = Math.min(courtCount, totalGames - generatedMatches.length)
-      if (matchesThisRound <= 0) break
+      let availablePlayers = players.filter(p => {
+        const roundsSinceLastMatch = nextRound - p.lastMatchRound
+        const alreadyInThisRound = newMatches.some(m =>
+          m.team1.some(t => t.id === p.id) || m.team2.some(t => t.id === p.id)
+        )
+        return roundsSinceLastMatch > minRestRounds && !alreadyInThisRound
+      })
 
-      for (let court = 1; court <= matchesThisRound; court++) {
-        // 이번 라운드에 배정 가능한 선수들 (이전 라운드에서 쉬었어야 함)
-        // 코트 수에 따라 최소 휴식 라운드 계산
-        const minRestRounds = courtCount >= 2 ? 1 : 0 // 코트가 2개 이상이면 최소 1라운드 휴식
-
-        let availablePlayers = players.filter(p => {
-          const roundsSinceLastMatch = round - p.lastMatchRound
-          // 이번 라운드에 이미 배정된 선수 제외
-          const alreadyInThisRound = generatedMatches
-            .filter(m => m.round === round)
-            .some(m =>
-              m.team1.some(t => t.id === p.id) ||
-              m.team2.some(t => t.id === p.id)
-            )
-          return roundsSinceLastMatch > minRestRounds && !alreadyInThisRound
+      if (availablePlayers.length < 4) {
+        // 휴식 조건 완화
+        availablePlayers = players.filter(p => {
+          const alreadyInThisRound = newMatches.some(m =>
+            m.team1.some(t => t.id === p.id) || m.team2.some(t => t.id === p.id)
+          )
+          return !alreadyInThisRound
         })
-
-        if (availablePlayers.length < 4) {
-          // 휴식 조건 완화
-          availablePlayers = players.filter(p => {
-            // 이번 라운드에 이미 배정된 선수 제외
-            const alreadyInThisRound = generatedMatches
-              .filter(m => m.round === round)
-              .some(m =>
-                m.team1.some(t => t.id === p.id) ||
-                m.team2.some(t => t.id === p.id)
-              )
-            return !alreadyInThisRound
-          })
-
-          if (availablePlayers.length < 4) continue
-        }
-
-        // 게임 수가 적은 선수 우선 선택
-        availablePlayers.sort((a, b) => a.gamesPlayed - b.gamesPlayed)
-
-        // 매치 타입 결정 (남복/여복/혼복 균형)
-        const males = availablePlayers.filter(p => p.gender === 'male')
-        const females = availablePlayers.filter(p => p.gender === 'female')
-
-        let matchType: 'men' | 'women' | 'mixed'
-        let selectedPlayers: typeof availablePlayers = []
-
-        // 각 타입별 진행 횟수 계산
-        const totalMen = players.reduce((sum, p) => sum + p.menDoubles, 0) / 4
-        const totalWomen = players.reduce((sum, p) => sum + p.womenDoubles, 0) / 4
-        const totalMixed = players.reduce((sum, p) => sum + p.mixedDoubles, 0) / 4
-
-        // 혼복 우선 (남녀 각 2명 이상일 때)
-        if (males.length >= 2 && females.length >= 2 && totalMixed <= totalMen && totalMixed <= totalWomen) {
-          matchType = 'mixed'
-          // 게임 수가 적은 남녀 각 2명씩 선택
-          const selectedMales = males.slice(0, 2)
-          const selectedFemales = females.slice(0, 2)
-
-          // 실력 균형: 강한 남 + 약한 여 vs 약한 남 + 강한 여
-          selectedMales.sort((a, b) => levelScore[b.level] - levelScore[a.level])
-          selectedFemales.sort((a, b) => levelScore[b.level] - levelScore[a.level])
-
-          selectedPlayers = [selectedMales[0], selectedFemales[1], selectedMales[1], selectedFemales[0]]
-        } else if (males.length >= 4 && (totalMen <= totalWomen || females.length < 4)) {
-          matchType = 'men'
-          selectedPlayers = males.slice(0, 4)
-        } else if (females.length >= 4 && (totalWomen <= totalMen || males.length < 4)) {
-          matchType = 'women'
-          selectedPlayers = females.slice(0, 4)
-        } else if (males.length >= 2 && females.length >= 2) {
-          matchType = 'mixed'
-          selectedPlayers = [...males.slice(0, 2), ...females.slice(0, 2)]
-        } else if (males.length >= 4) {
-          matchType = 'men'
-          selectedPlayers = males.slice(0, 4)
-        } else if (females.length >= 4) {
-          matchType = 'women'
-          selectedPlayers = females.slice(0, 4)
-        } else {
-          continue // 매치 구성 불가
-        }
-
-        if (selectedPlayers.length < 4) continue
-
-        // 팀 구성 (실력 균형)
-        let team1: [Attendee, Attendee]
-        let team2: [Attendee, Attendee]
-
-        if (matchType === 'mixed') {
-          // 혼복: 실력 기반으로 이미 정렬됨
-          team1 = [selectedPlayers[0], selectedPlayers[1]] // 강남 + 약여
-          team2 = [selectedPlayers[2], selectedPlayers[3]] // 약남 + 강여
-        } else {
-          // 동성 복식: 실력 균형 (1+4 vs 2+3)
-          selectedPlayers.sort((a, b) => levelScore[b.level] - levelScore[a.level])
-          team1 = [selectedPlayers[0], selectedPlayers[3]]
-          team2 = [selectedPlayers[1], selectedPlayers[2]]
-        }
-
-        // 매치 추가
-        const match: GeneratedMatch = {
-          round,
-          court,
-          team1,
-          team2,
-          matchType,
-        }
-        generatedMatches.push(match)
-
-        // 선수 상태 업데이트
-        const allPlayersInMatch = [...team1, ...team2]
-        allPlayersInMatch.forEach(p => {
-          const playerIdx = players.findIndex(pl => pl.id === p.id)
-          if (playerIdx !== -1) {
-            players[playerIdx].gamesPlayed++
-            players[playerIdx].lastMatchRound = round
-            if (matchType === 'men') players[playerIdx].menDoubles++
-            else if (matchType === 'women') players[playerIdx].womenDoubles++
-            else players[playerIdx].mixedDoubles++
-          }
-        })
+        if (availablePlayers.length < 4) continue
       }
+
+      // 게임 수 적은 사람 우선
+      availablePlayers.sort((a, b) => a.gamesPlayed - b.gamesPlayed)
+
+      // 매치 타입 결정
+      const males = availablePlayers.filter(p => p.gender === 'male')
+      const females = availablePlayers.filter(p => p.gender === 'female')
+
+      const totalMen = players.reduce((sum, p) => sum + p.menDoubles, 0)
+      const totalWomen = players.reduce((sum, p) => sum + p.womenDoubles, 0)
+      const totalMixed = players.reduce((sum, p) => sum + p.mixedDoubles, 0)
+
+      let matchType: 'men' | 'women' | 'mixed'
+      let selectedPlayers: Attendee[] = []
+
+      if (males.length >= 2 && females.length >= 2 && totalMixed <= totalMen && totalMixed <= totalWomen) {
+        matchType = 'mixed'
+        const selectedMales = males.slice(0, 2)
+        const selectedFemales = females.slice(0, 2)
+        selectedMales.sort((a, b) => a.rank - b.rank)
+        selectedFemales.sort((a, b) => a.rank - b.rank)
+        selectedPlayers = [selectedMales[0], selectedFemales[1] || selectedFemales[0], selectedMales[1] || selectedMales[0], selectedFemales[0]]
+      } else if (males.length >= 4 && (totalMen <= totalWomen || females.length < 4)) {
+        matchType = 'men'
+        selectedPlayers = males.slice(0, 4)
+      } else if (females.length >= 4) {
+        matchType = 'women'
+        selectedPlayers = females.slice(0, 4)
+      } else if (males.length >= 2 && females.length >= 2) {
+        matchType = 'mixed'
+        selectedPlayers = [...males.slice(0, 2), ...females.slice(0, 2)]
+      } else if (males.length >= 4) {
+        matchType = 'men'
+        selectedPlayers = males.slice(0, 4)
+      } else {
+        continue
+      }
+
+      if (selectedPlayers.length < 4) continue
+
+      // 팀 구성 (순위 기반 밸런스)
+      let team1: [Attendee, Attendee]
+      let team2: [Attendee, Attendee]
+
+      if (matchType === 'mixed') {
+        team1 = [selectedPlayers[0], selectedPlayers[1]]
+        team2 = [selectedPlayers[2], selectedPlayers[3]]
+      } else {
+        selectedPlayers.sort((a, b) => a.rank - b.rank)
+        team1 = [selectedPlayers[0], selectedPlayers[3]]
+        team2 = [selectedPlayers[1], selectedPlayers[2]]
+      }
+
+      const match: GeneratedMatch = { round: nextRound, court, team1, team2, matchType }
+      newMatches.push(match)
+
+      // 선수 상태 업데이트
+      ;[...team1, ...team2].forEach(p => {
+        const idx = players.findIndex(pl => pl.id === p.id)
+        if (idx !== -1) {
+          players[idx].gamesPlayed++
+          players[idx].lastMatchRound = nextRound
+          if (matchType === 'men') players[idx].menDoubles++
+          else if (matchType === 'women') players[idx].womenDoubles++
+          else players[idx].mixedDoubles++
+        }
+      })
     }
 
-    // 최종 상태 반영
-    setAttendees(players)
-    setMatches(generatedMatches)
-    setIsGenerated(true)
+    if (newMatches.length > 0) {
+      setAttendees(players)
+      setMatches([...matches, ...newMatches])
+      setCurrentRound(nextRound)
+    }
   }
 
-  // 대진표 초기화
-  const resetMatches = () => {
+  // 전체 초기화
+  const resetAll = () => {
+    if (!confirm('대진표를 초기화하시겠습니까?')) return
     setMatches([])
-    setIsGenerated(false)
+    setCurrentRound(0)
     setAttendees(attendees.map(a => ({
       ...a,
       gamesPlayed: a.isLate ? a.gamesBeforeArrival : 0,
@@ -384,346 +338,389 @@ export default function MatchesPage() {
   // 통계
   const maleCount = attendees.filter(a => a.gender === 'male').length
   const femaleCount = attendees.filter(a => a.gender === 'female').length
-  const guestCount = attendees.filter(a => a.isGuest).length
 
   return (
-    <div className="space-y-4 md:space-y-6">
-      <h1 className="text-xl md:text-2xl font-bold text-gray-800">대진표</h1>
-
-      {/* 설정 섹션 */}
-      <div className="card">
-        <div
-          className="flex items-center justify-between cursor-pointer"
-          onClick={() => setShowSettings(!showSettings)}
+    <div className="min-h-screen bg-slate-900 -m-4 md:-m-6 p-4 md:p-6">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-xl md:text-2xl font-bold text-white flex items-center gap-2">
+          <Trophy className="text-yellow-400" size={24} />
+          대진표
+        </h1>
+        <button
+          onClick={() => setShowSettingsModal(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
         >
-          <h2 className="text-base md:text-lg font-semibold text-gray-700">설정</h2>
-          {showSettings ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+          <Settings size={18} />
+          <span className="hidden md:inline">설정</span>
+        </button>
+      </div>
+
+      {/* 메인 컨텐츠 */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* 참석자 패널 */}
+        <div className="lg:col-span-1 bg-slate-800 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">
+              참석자 <span className="text-blue-400">({attendees.length})</span>
+            </h2>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-blue-400">♂ {maleCount}</span>
+              <span className="text-pink-400">♀ {femaleCount}</span>
+            </div>
+          </div>
+
+          {/* 참석자 목록 */}
+          <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+            {attendees.length === 0 ? (
+              <div className="text-center py-8 text-slate-500">
+                설정에서 참석자를 추가하세요
+              </div>
+            ) : (
+              attendees.map((a, idx) => (
+                <div
+                  key={a.id}
+                  className={`
+                    flex items-center gap-2 p-2 rounded-lg transition-all
+                    ${a.isGuest ? 'bg-orange-900/30 border border-orange-700/50' : 'bg-slate-700/50'}
+                    ${a.isLate ? 'opacity-50' : ''}
+                  `}
+                >
+                  {/* 순위 */}
+                  <div className="flex flex-col items-center">
+                    <button
+                      onClick={() => moveRank(a.id, 'up')}
+                      className="text-slate-500 hover:text-white p-0.5"
+                      disabled={idx === 0}
+                    >
+                      <ChevronUp size={14} />
+                    </button>
+                    <span className="text-xs font-bold text-blue-400 w-5 text-center">{a.rank}</span>
+                    <button
+                      onClick={() => moveRank(a.id, 'down')}
+                      className="text-slate-500 hover:text-white p-0.5"
+                      disabled={idx === attendees.length - 1}
+                    >
+                      <ChevronDown size={14} />
+                    </button>
+                  </div>
+
+                  {/* 정보 */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-medium ${a.gender === 'male' ? 'text-blue-300' : 'text-pink-300'}`}>
+                        {a.name}
+                      </span>
+                      {a.isGuest && (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-orange-600/50 text-orange-300 rounded">G</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-400">
+                      <span>{genderLabels[a.gender]}</span>
+                      {matches.length > 0 && <span>• {a.gamesPlayed}게임</span>}
+                    </div>
+                  </div>
+
+                  {/* 액션 */}
+                  <button
+                    onClick={() => toggleLate(a.id)}
+                    className={`p-1.5 rounded ${a.isLate ? 'bg-yellow-600/50 text-yellow-300' : 'text-slate-500 hover:text-yellow-400'}`}
+                    title={a.isLate ? `지각 (+${a.gamesBeforeArrival})` : '지각 설정'}
+                  >
+                    <Clock size={14} />
+                  </button>
+                  <button
+                    onClick={() => removeAttendee(a.id)}
+                    className="p-1.5 text-slate-500 hover:text-red-400"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* 액션 버튼 */}
+          <div className="mt-4 space-y-2">
+            <button
+              onClick={generateNextRound}
+              disabled={attendees.length < 4}
+              className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-medium rounded-lg transition-colors"
+            >
+              <Play size={18} />
+              {currentRound === 0 ? '대진표 시작' : `${currentRound + 1}라운드 생성`}
+            </button>
+            {matches.length > 0 && (
+              <button
+                onClick={resetAll}
+                className="w-full flex items-center justify-center gap-2 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors"
+              >
+                <RotateCcw size={16} />
+                초기화
+              </button>
+            )}
+          </div>
         </div>
 
-        {showSettings && (
-          <div className="mt-4 space-y-4">
-            {/* 코트 수 & 게임 수 */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">코트 수</label>
-                <select
-                  className="input"
-                  value={courtCount}
-                  onChange={(e) => setCourtCount(Number(e.target.value))}
-                >
-                  <option value={1}>1개</option>
-                  <option value={2}>2개</option>
-                  <option value={3}>3개</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">총 게임 수</label>
-                <input
-                  type="number"
-                  className="input"
-                  value={totalGames}
-                  onChange={(e) => setTotalGames(Number(e.target.value))}
-                  min={1}
-                  max={100}
-                />
-              </div>
+        {/* 대진표 패널 */}
+        <div className="lg:col-span-2 bg-slate-800 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">
+              대진표 {matches.length > 0 && <span className="text-blue-400">({matches.length}게임)</span>}
+            </h2>
+            <div className="text-sm text-slate-400">
+              코트 {courtCount}개
             </div>
+          </div>
 
-            {/* 회원 검색 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                <Users size={16} className="inline mr-1" />
-                회원 추가
-              </label>
-              <div className="relative" ref={searchRef}>
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                <input
-                  type="text"
-                  className="input pl-10"
-                  placeholder="이름/닉네임 검색..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value)
-                    setShowSearchDropdown(true)
-                  }}
-                  onFocus={() => setShowSearchDropdown(true)}
-                />
-                {showSearchDropdown && searchTerm && (
-                  <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-auto">
-                    {filteredMembers.length === 0 ? (
-                      <div className="p-3 text-sm text-gray-500">검색 결과 없음</div>
-                    ) : (
-                      filteredMembers.slice(0, 10).map(member => (
+          {matches.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-slate-500">
+              <Trophy size={48} className="mb-4 opacity-30" />
+              <p>참석자를 추가하고 대진표를 생성하세요</p>
+            </div>
+          ) : (
+            <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
+              {Array.from(new Set(matches.map(m => m.round))).reverse().map(round => (
+                <div key={round} className="bg-slate-700/50 rounded-lg overflow-hidden">
+                  <div className="bg-slate-600/50 px-4 py-2 font-medium text-white flex items-center justify-between">
+                    <span>{round}라운드</span>
+                    <span className="text-xs text-slate-400">
+                      {matches.filter(m => m.round === round).length}게임
+                    </span>
+                  </div>
+                  <div className="p-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {matches
+                      .filter(m => m.round === round)
+                      .map((match) => (
                         <div
-                          key={member.id}
-                          className="p-3 hover:bg-gray-50 cursor-pointer flex items-center justify-between"
-                          onClick={() => addMember(member)}
+                          key={`${match.round}-${match.court}`}
+                          className={`
+                            p-3 rounded-lg border
+                            ${match.matchType === 'men'
+                              ? 'bg-blue-900/30 border-blue-700/50'
+                              : match.matchType === 'women'
+                              ? 'bg-pink-900/30 border-pink-700/50'
+                              : 'bg-purple-900/30 border-purple-700/50'}
+                          `}
                         >
-                          <div>
-                            <span className="font-medium">{member.name}</span>
-                            {member.nickname && (
-                              <span className="text-gray-500 ml-1">({member.nickname})</span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 text-xs">
-                            <span className={member.gender === 'male' ? 'text-blue-600' : 'text-pink-600'}>
-                              {genderLabels[member.gender || 'male']}
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-medium text-slate-400">
+                              코트 {match.court}
                             </span>
-                            <span className="text-gray-500">{levelLabels[member.level]}</span>
+                            <span className={`
+                              text-xs px-2 py-0.5 rounded-full
+                              ${match.matchType === 'men'
+                                ? 'bg-blue-600/50 text-blue-300'
+                                : match.matchType === 'women'
+                                ? 'bg-pink-600/50 text-pink-300'
+                                : 'bg-purple-600/50 text-purple-300'}
+                            `}>
+                              {match.matchType === 'men' ? '남복' : match.matchType === 'women' ? '여복' : '혼복'}
+                            </span>
+                          </div>
+
+                          <div className="text-sm text-white">
+                            <div className="mb-1">
+                              {match.team1[0].name}
+                              {match.team1[0].isGuest && <span className="text-orange-400">*</span>}
+                              <span className="text-slate-500 mx-1">&</span>
+                              {match.team1[1].name}
+                              {match.team1[1].isGuest && <span className="text-orange-400">*</span>}
+                            </div>
+                            <div className="text-center text-xs text-slate-500 my-1">VS</div>
+                            <div>
+                              {match.team2[0].name}
+                              {match.team2[0].isGuest && <span className="text-orange-400">*</span>}
+                              <span className="text-slate-500 mx-1">&</span>
+                              {match.team2[1].name}
+                              {match.team2[1].isGuest && <span className="text-orange-400">*</span>}
+                            </div>
                           </div>
                         </div>
-                      ))
-                    )}
+                      ))}
                   </div>
-                )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 개인 통계 */}
+          {matches.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-slate-700">
+              <h3 className="text-sm font-medium text-slate-400 mb-2">개인별 게임 수</h3>
+              <div className="flex flex-wrap gap-2">
+                {[...attendees]
+                  .sort((a, b) => b.gamesPlayed - a.gamesPlayed)
+                  .map(a => (
+                    <span
+                      key={a.id}
+                      className={`
+                        px-2 py-1 rounded text-xs
+                        ${a.isGuest ? 'bg-orange-900/30 text-orange-300' : 'bg-slate-700 text-slate-300'}
+                      `}
+                    >
+                      {a.name}: <strong className="text-white">{a.gamesPlayed}</strong>
+                    </span>
+                  ))}
               </div>
             </div>
+          )}
+        </div>
+      </div>
 
-            {/* 게스트 추가 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                <UserPlus size={16} className="inline mr-1" />
-                게스트 추가
-              </label>
-              <div className="flex flex-col md:flex-row gap-2">
-                <input
-                  type="text"
-                  className="input flex-1"
-                  placeholder="게스트 이름"
-                  value={guestName}
-                  onChange={(e) => setGuestName(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && addGuest()}
-                />
+      {/* 설정 모달 */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-start justify-start p-4">
+          <div className="bg-slate-800 rounded-xl shadow-2xl w-full max-w-md mt-16 ml-0 md:ml-4 animate-slide-in">
+            <div className="flex items-center justify-between p-4 border-b border-slate-700">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Settings size={20} />
+                설정
+              </h3>
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="p-1 text-slate-400 hover:text-white"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+              {/* 코트 수 */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">코트 수</label>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setCourtCount(Math.max(1, courtCount - 1))}
+                    className="p-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg"
+                  >
+                    <Minus size={18} />
+                  </button>
+                  <input
+                    type="number"
+                    className="w-20 text-center bg-slate-700 border border-slate-600 text-white rounded-lg py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={courtCount}
+                    onChange={(e) => setCourtCount(Math.max(1, Number(e.target.value)))}
+                    min={1}
+                  />
+                  <button
+                    onClick={() => setCourtCount(courtCount + 1)}
+                    className="p-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg"
+                  >
+                    <Plus size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* 회원 추가 */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  <Users size={14} className="inline mr-1" />
+                  회원 추가
+                </label>
+                <div className="relative" ref={searchRef}>
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+                  <input
+                    type="text"
+                    className="w-full pl-9 pr-3 py-2 bg-slate-700 border border-slate-600 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-500"
+                    placeholder="이름/닉네임 검색..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value)
+                      setShowSearchDropdown(true)
+                    }}
+                    onFocus={() => setShowSearchDropdown(true)}
+                  />
+                  {showSearchDropdown && searchTerm && (
+                    <div className="absolute z-20 w-full mt-1 bg-slate-700 border border-slate-600 rounded-lg shadow-lg max-h-40 overflow-auto">
+                      {filteredMembers.length === 0 ? (
+                        <div className="p-3 text-sm text-slate-500">검색 결과 없음</div>
+                      ) : (
+                        filteredMembers.slice(0, 8).map(member => (
+                          <div
+                            key={member.id}
+                            className="p-2 hover:bg-slate-600 cursor-pointer flex items-center justify-between text-sm"
+                            onClick={() => addMember(member)}
+                          >
+                            <span className="text-white">{member.name}</span>
+                            <span className={member.gender === 'male' ? 'text-blue-400' : 'text-pink-400'}>
+                              {genderLabels[member.gender || 'male']}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 게스트 추가 */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  <UserPlus size={14} className="inline mr-1" />
+                  게스트 추가
+                </label>
                 <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-500"
+                    placeholder="이름"
+                    value={guestName}
+                    onChange={(e) => setGuestName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addGuest()}
+                  />
                   <select
-                    className="input w-20"
+                    className="w-16 px-2 py-2 bg-slate-700 border border-slate-600 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     value={guestGender}
                     onChange={(e) => setGuestGender(e.target.value as MemberGender)}
                   >
                     <option value="male">남</option>
                     <option value="female">여</option>
                   </select>
-                  <select
-                    className="input flex-1 md:w-24"
-                    value={guestLevel}
-                    onChange={(e) => setGuestLevel(e.target.value as MemberLevel)}
-                  >
-                    {Object.entries(levelLabels).map(([key, label]) => (
-                      <option key={key} value={key}>{label}</option>
-                    ))}
-                  </select>
                   <button
                     onClick={addGuest}
-                    className="btn btn-secondary whitespace-nowrap"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
                   >
                     추가
                   </button>
                 </div>
               </div>
+
+              {/* 현재 참석자 목록 미리보기 */}
+              {attendees.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    참석자 ({attendees.length}명) - 순위순
+                  </label>
+                  <div className="bg-slate-700/50 rounded-lg p-2 max-h-32 overflow-y-auto">
+                    <div className="flex flex-wrap gap-1">
+                      {attendees.map(a => (
+                        <span
+                          key={a.id}
+                          className={`
+                            text-xs px-2 py-1 rounded
+                            ${a.isGuest ? 'bg-orange-600/30 text-orange-300' : 'bg-slate-600 text-slate-300'}
+                          `}
+                        >
+                          {a.rank}. {a.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    * 순위는 참석자 목록에서 위/아래 버튼으로 조정
+                  </p>
+                </div>
+              )}
             </div>
-          </div>
-        )}
-      </div>
 
-      {/* 참석자 목록 */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base md:text-lg font-semibold text-gray-700">
-            참석자 ({attendees.length}명)
-          </h2>
-          <div className="flex items-center gap-3 text-sm">
-            <span className="text-blue-600">남 {maleCount}</span>
-            <span className="text-pink-600">여 {femaleCount}</span>
-            {guestCount > 0 && <span className="text-orange-600">게스트 {guestCount}</span>}
-          </div>
-        </div>
-
-        {attendees.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
-            참석자를 추가해주세요
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-            {attendees.map(attendee => (
-              <div
-                key={attendee.id}
-                className={`
-                  relative p-3 rounded-lg border-2 transition-all
-                  ${attendee.isGuest
-                    ? 'bg-orange-50 border-orange-200'
-                    : 'bg-white border-gray-200'
-                  }
-                  ${attendee.isLate ? 'opacity-60' : ''}
-                `}
+            <div className="p-4 border-t border-slate-700">
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-lg transition-colors"
               >
-                {/* 삭제 버튼 */}
-                <button
-                  onClick={() => removeAttendee(attendee.id)}
-                  className="absolute top-1 right-1 p-1 text-gray-400 hover:text-red-500"
-                >
-                  <X size={16} />
-                </button>
-
-                {/* 이름 */}
-                <div className="font-medium text-gray-800 pr-6">
-                  {attendee.name}
-                  {attendee.nickname && (
-                    <span className="text-gray-500 text-sm ml-1">({attendee.nickname})</span>
-                  )}
-                </div>
-
-                {/* 정보 */}
-                <div className="flex items-center gap-2 mt-1 text-xs">
-                  <span className={attendee.gender === 'male' ? 'text-blue-600 font-medium' : 'text-pink-600 font-medium'}>
-                    {genderLabels[attendee.gender]}
-                  </span>
-                  <span className="text-gray-500">{levelLabels[attendee.level]}</span>
-                  {attendee.isGuest && (
-                    <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded">게스트</span>
-                  )}
-                </div>
-
-                {/* 지각 버튼 & 게임 수 */}
-                <div className="flex items-center justify-between mt-2">
-                  <button
-                    onClick={() => toggleLate(attendee.id)}
-                    className={`
-                      flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors
-                      ${attendee.isLate
-                        ? 'bg-yellow-100 text-yellow-700'
-                        : 'bg-gray-100 text-gray-600 hover:bg-yellow-50'
-                      }
-                    `}
-                  >
-                    <Clock size={12} />
-                    {attendee.isLate ? `지각 (+${attendee.gamesBeforeArrival})` : '지각'}
-                  </button>
-                  {isGenerated && (
-                    <span className="text-xs text-gray-500">
-                      {attendee.gamesPlayed}게임
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* 생성 버튼 */}
-      <div className="flex gap-2">
-        <button
-          onClick={generateMatches}
-          disabled={attendees.length < 4}
-          className="btn btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <Shuffle size={18} />
-          대진표 생성
-        </button>
-        {isGenerated && (
-          <button
-            onClick={resetMatches}
-            className="btn btn-secondary flex items-center gap-2"
-          >
-            <RotateCcw size={18} />
-            초기화
-          </button>
-        )}
-      </div>
-
-      {/* 생성된 대진표 */}
-      {isGenerated && matches.length > 0 && (
-        <div className="card">
-          <h2 className="text-base md:text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
-            <Trophy size={20} className="text-yellow-500" />
-            대진표 ({matches.length}게임)
-          </h2>
-
-          <div className="space-y-4">
-            {/* 라운드별 그룹화 */}
-            {Array.from(new Set(matches.map(m => m.round))).map(round => (
-              <div key={round} className="border border-gray-200 rounded-lg overflow-hidden">
-                <div className="bg-gray-50 px-4 py-2 font-medium text-gray-700">
-                  {round}라운드
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-3">
-                  {matches
-                    .filter(m => m.round === round)
-                    .map((match, idx) => (
-                      <div
-                        key={`${round}-${match.court}`}
-                        className={`
-                          p-3 rounded-lg border-2
-                          ${match.matchType === 'men' ? 'bg-blue-50 border-blue-200' :
-                            match.matchType === 'women' ? 'bg-pink-50 border-pink-200' :
-                            'bg-purple-50 border-purple-200'}
-                        `}
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-medium text-gray-500">
-                            코트 {match.court}
-                          </span>
-                          <span className={`
-                            text-xs px-2 py-0.5 rounded-full
-                            ${match.matchType === 'men' ? 'bg-blue-200 text-blue-700' :
-                              match.matchType === 'women' ? 'bg-pink-200 text-pink-700' :
-                              'bg-purple-200 text-purple-700'}
-                          `}>
-                            {match.matchType === 'men' ? '남복' :
-                             match.matchType === 'women' ? '여복' : '혼복'}
-                          </span>
-                        </div>
-
-                        {/* Team 1 */}
-                        <div className="mb-2">
-                          <div className="text-sm font-medium">
-                            {match.team1[0].name}
-                            {match.team1[0].isGuest && <span className="text-orange-500 ml-1">*</span>}
-                            <span className="text-gray-400 mx-1">&</span>
-                            {match.team1[1].name}
-                            {match.team1[1].isGuest && <span className="text-orange-500 ml-1">*</span>}
-                          </div>
-                        </div>
-
-                        <div className="text-center text-gray-400 text-xs">vs</div>
-
-                        {/* Team 2 */}
-                        <div className="mt-2">
-                          <div className="text-sm font-medium">
-                            {match.team2[0].name}
-                            {match.team2[0].isGuest && <span className="text-orange-500 ml-1">*</span>}
-                            <span className="text-gray-400 mx-1">&</span>
-                            {match.team2[1].name}
-                            {match.team2[1].isGuest && <span className="text-orange-500 ml-1">*</span>}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* 개인별 통계 */}
-          <div className="mt-6 pt-4 border-t border-gray-200">
-            <h3 className="font-medium text-gray-700 mb-3">개인별 게임 수</h3>
-            <div className="flex flex-wrap gap-2">
-              {attendees
-                .sort((a, b) => b.gamesPlayed - a.gamesPlayed)
-                .map(a => (
-                  <span
-                    key={a.id}
-                    className={`
-                      px-2 py-1 rounded text-sm
-                      ${a.isGuest ? 'bg-orange-100' : 'bg-gray-100'}
-                    `}
-                  >
-                    {a.name}: <strong>{a.gamesPlayed}</strong>
-                    <span className="text-xs text-gray-500 ml-1">
-                      (남{a.menDoubles}/여{a.womenDoubles}/혼{a.mixedDoubles})
-                    </span>
-                  </span>
-                ))}
+                완료
+              </button>
             </div>
           </div>
         </div>
@@ -731,31 +728,30 @@ export default function MatchesPage() {
 
       {/* 지각 설정 모달 */}
       {lateSettingId && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
-            <h3 className="text-lg font-semibold mb-4">지각 설정</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              도착 전까지 다른 참석자들이 평균 몇 게임을 진행했나요?
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-800 rounded-xl shadow-2xl p-6 w-full max-w-sm">
+            <h3 className="text-lg font-semibold text-white mb-4">지각 설정</h3>
+            <p className="text-sm text-slate-400 mb-4">
+              도착 전까지 평균 몇 게임이 진행되었나요?
             </p>
             <input
               type="number"
-              className="input mb-4"
+              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
               value={lateGamesInput}
               onChange={(e) => setLateGamesInput(Number(e.target.value))}
               min={0}
-              max={20}
               placeholder="게임 수"
             />
             <div className="flex gap-2">
               <button
                 onClick={() => setLateSettingId(null)}
-                className="btn btn-secondary flex-1"
+                className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
               >
                 취소
               </button>
               <button
                 onClick={saveLateSettings}
-                className="btn btn-primary flex-1"
+                className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
               >
                 저장
               </button>
@@ -763,11 +759,6 @@ export default function MatchesPage() {
           </div>
         </div>
       )}
-
-      {/* 도움말 */}
-      <div className="text-xs md:text-sm text-gray-500 hidden md:block">
-        * 게스트 표시 | 지각자는 도착 전 평균 게임 수만큼 이미 플레이한 것으로 계산
-      </div>
     </div>
   )
 }
