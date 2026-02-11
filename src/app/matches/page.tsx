@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Users,
   UserPlus,
@@ -12,12 +12,13 @@ import {
   Settings,
   Clock,
   Trophy,
-  GripVertical,
   ChevronUp,
   ChevronDown,
   RotateCcw,
   Plus,
-  Minus
+  Minus,
+  Save,
+  Loader2
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 import { Member, MemberGender } from '@/types/database'
@@ -34,7 +35,7 @@ interface Attendee {
   name: string
   nickname?: string | null
   gender: MemberGender
-  rank: number // 실력 순위 (1이 가장 높음)
+  rank: number
   isGuest: boolean
   isLate: boolean
   gamesBeforeArrival: number
@@ -54,8 +55,18 @@ interface GeneratedMatch {
   matchType: 'men' | 'women' | 'mixed'
 }
 
+// 오늘 날짜 (YYYY-MM-DD)
+const getToday = () => new Date().toISOString().split('T')[0]
+
 export default function MatchesPage() {
   const supabase = createClient()
+
+  // 세션 상태
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [sessionDate, setSessionDate] = useState(getToday())
+  const [isSaving, setIsSaving] = useState(false)
+  const [lastSaved, setLastSaved] = useState<Date | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
   // 설정
   const [courtCount, setCourtCount] = useState(2)
@@ -82,21 +93,118 @@ export default function MatchesPage() {
   const [matches, setMatches] = useState<GeneratedMatch[]>([])
   const [currentRound, setCurrentRound] = useState(0)
 
-  // 드래그 상태
-  const [draggedId, setDraggedId] = useState<string | null>(null)
+  // 자동 저장 타이머
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // 회원 목록 조회
+  // 세션 저장 함수
+  const saveSession = useCallback(async (
+    newAttendees?: Attendee[],
+    newMatches?: GeneratedMatch[],
+    newRound?: number,
+    newCourtCount?: number
+  ) => {
+    const dataToSave = {
+      attendees: newAttendees ?? attendees,
+      matches: newMatches ?? matches,
+      currentRound: newRound ?? currentRound,
+      courtCount: newCourtCount ?? courtCount,
+    }
+
+    // 참석자가 없으면 저장하지 않음
+    if (dataToSave.attendees.length === 0 && !sessionId) return
+
+    setIsSaving(true)
+
+    try {
+      if (sessionId) {
+        // 기존 세션 업데이트
+        const { error } = await supabase
+          .from('match_sessions')
+          .update({
+            court_count: dataToSave.courtCount,
+            attendees: dataToSave.attendees,
+            matches: dataToSave.matches,
+            current_round: dataToSave.currentRound,
+          })
+          .eq('id', sessionId)
+
+        if (error) throw error
+      } else if (dataToSave.attendees.length > 0) {
+        // 새 세션 생성
+        const { data, error } = await supabase
+          .from('match_sessions')
+          .insert({
+            session_date: sessionDate,
+            court_count: dataToSave.courtCount,
+            attendees: dataToSave.attendees,
+            matches: dataToSave.matches,
+            current_round: dataToSave.currentRound,
+            status: 'active',
+          })
+          .select()
+          .single()
+
+        if (error) throw error
+        if (data) setSessionId(data.id)
+      }
+
+      setLastSaved(new Date())
+    } catch (error) {
+      console.error('세션 저장 실패:', error)
+    } finally {
+      setIsSaving(false)
+    }
+  }, [sessionId, sessionDate, attendees, matches, currentRound, courtCount, supabase])
+
+  // 자동 저장 (디바운스)
+  const scheduleAutoSave = useCallback((
+    newAttendees?: Attendee[],
+    newMatches?: GeneratedMatch[],
+    newRound?: number,
+    newCourtCount?: number
+  ) => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+    saveTimeoutRef.current = setTimeout(() => {
+      saveSession(newAttendees, newMatches, newRound, newCourtCount)
+    }, 1000) // 1초 디바운스
+  }, [saveSession])
+
+  // 오늘의 세션 불러오기
   useEffect(() => {
-    const fetchMembers = async () => {
-      const { data } = await supabase
+    const loadTodaySession = async () => {
+      setIsLoading(true)
+
+      // 회원 목록 조회
+      const { data: membersData } = await supabase
         .from('members')
         .select('*')
         .eq('status', 'active')
         .order('name')
-      if (data) setMembers(data)
+      if (membersData) setMembers(membersData)
+
+      // 오늘의 활성 세션 조회
+      const { data: sessionData } = await supabase
+        .from('match_sessions')
+        .select('*')
+        .eq('session_date', sessionDate)
+        .eq('status', 'active')
+        .single()
+
+      if (sessionData) {
+        setSessionId(sessionData.id)
+        setCourtCount(sessionData.court_count)
+        setAttendees(sessionData.attendees || [])
+        setMatches(sessionData.matches || [])
+        setCurrentRound(sessionData.current_round || 0)
+      }
+
+      setIsLoading(false)
     }
-    fetchMembers()
-  }, [])
+
+    loadTodaySession()
+  }, [sessionDate, supabase])
 
   // 검색 드롭다운 외부 클릭
   useEffect(() => {
@@ -107,6 +215,15 @@ export default function MatchesPage() {
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // 컴포넌트 언마운트 시 타이머 정리
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
   }, [])
 
   // 검색 결과
@@ -132,9 +249,11 @@ export default function MatchesPage() {
       mixedDoubles: 0,
       lastMatchRound: -999,
     }
-    setAttendees([...attendees, newAttendee])
+    const newAttendees = [...attendees, newAttendee]
+    setAttendees(newAttendees)
     setSearchTerm('')
     setShowSearchDropdown(false)
+    scheduleAutoSave(newAttendees)
   }
 
   // 게스트 추가
@@ -155,19 +274,21 @@ export default function MatchesPage() {
       mixedDoubles: 0,
       lastMatchRound: -999,
     }
-    setAttendees([...attendees, newAttendee])
+    const newAttendees = [...attendees, newAttendee]
+    setAttendees(newAttendees)
     setGuestName('')
+    scheduleAutoSave(newAttendees)
   }
 
   // 참석자 제거
   const removeAttendee = (id: string) => {
     const filtered = attendees.filter(a => a.id !== id)
-    // 순위 재정렬
     const reranked = filtered.map((a, idx) => ({ ...a, rank: idx + 1 }))
     setAttendees(reranked)
+    scheduleAutoSave(reranked)
   }
 
-  // 순위 변경 (드래그 or 버튼)
+  // 순위 변경
   const moveRank = (id: string, direction: 'up' | 'down') => {
     const idx = attendees.findIndex(a => a.id === id)
     if (idx === -1) return
@@ -177,10 +298,9 @@ export default function MatchesPage() {
     const newAttendees = [...attendees]
     const swapIdx = direction === 'up' ? idx - 1 : idx + 1
     ;[newAttendees[idx], newAttendees[swapIdx]] = [newAttendees[swapIdx], newAttendees[idx]]
-
-    // 순위 재정렬
     const reranked = newAttendees.map((a, i) => ({ ...a, rank: i + 1 }))
     setAttendees(reranked)
+    scheduleAutoSave(reranked)
   }
 
   // 지각 토글
@@ -192,22 +312,33 @@ export default function MatchesPage() {
       setLateSettingId(id)
       setLateGamesInput(0)
     } else {
-      setAttendees(attendees.map(a =>
+      const updated = attendees.map(a =>
         a.id === id ? { ...a, isLate: false, gamesBeforeArrival: 0, gamesPlayed: 0 } : a
-      ))
+      )
+      setAttendees(updated)
+      scheduleAutoSave(updated)
     }
   }
 
   // 지각 설정 저장
   const saveLateSettings = () => {
     if (lateSettingId) {
-      setAttendees(attendees.map(a =>
+      const updated = attendees.map(a =>
         a.id === lateSettingId
           ? { ...a, isLate: true, gamesBeforeArrival: lateGamesInput, gamesPlayed: lateGamesInput }
           : a
-      ))
+      )
+      setAttendees(updated)
       setLateSettingId(null)
+      scheduleAutoSave(updated)
     }
+  }
+
+  // 코트 수 변경
+  const updateCourtCount = (newCount: number) => {
+    const count = Math.max(1, newCount)
+    setCourtCount(count)
+    scheduleAutoSave(undefined, undefined, undefined, count)
   }
 
   // 다음 라운드 생성
@@ -221,9 +352,7 @@ export default function MatchesPage() {
     const players = [...attendees]
     const newMatches: GeneratedMatch[] = []
 
-    // 코트 수만큼 매치 생성
     for (let court = 1; court <= courtCount; court++) {
-      // 이번 라운드에 배정 가능한 선수들
       const minRestRounds = courtCount >= 2 ? 1 : 0
 
       let availablePlayers = players.filter(p => {
@@ -235,7 +364,6 @@ export default function MatchesPage() {
       })
 
       if (availablePlayers.length < 4) {
-        // 휴식 조건 완화
         availablePlayers = players.filter(p => {
           const alreadyInThisRound = newMatches.some(m =>
             m.team1.some(t => t.id === p.id) || m.team2.some(t => t.id === p.id)
@@ -245,10 +373,8 @@ export default function MatchesPage() {
         if (availablePlayers.length < 4) continue
       }
 
-      // 게임 수 적은 사람 우선
       availablePlayers.sort((a, b) => a.gamesPlayed - b.gamesPlayed)
 
-      // 매치 타입 결정
       const males = availablePlayers.filter(p => p.gender === 'male')
       const females = availablePlayers.filter(p => p.gender === 'female')
 
@@ -284,7 +410,6 @@ export default function MatchesPage() {
 
       if (selectedPlayers.length < 4) continue
 
-      // 팀 구성 (순위 기반 밸런스)
       let team1: [Attendee, Attendee]
       let team2: [Attendee, Attendee]
 
@@ -300,7 +425,6 @@ export default function MatchesPage() {
       const match: GeneratedMatch = { round: nextRound, court, team1, team2, matchType }
       newMatches.push(match)
 
-      // 선수 상태 업데이트
       ;[...team1, ...team2].forEach(p => {
         const idx = players.findIndex(pl => pl.id === p.id)
         if (idx !== -1) {
@@ -314,39 +438,74 @@ export default function MatchesPage() {
     }
 
     if (newMatches.length > 0) {
+      const allMatches = [...matches, ...newMatches]
       setAttendees(players)
-      setMatches([...matches, ...newMatches])
+      setMatches(allMatches)
       setCurrentRound(nextRound)
+      scheduleAutoSave(players, allMatches, nextRound)
     }
   }
 
   // 전체 초기화
-  const resetAll = () => {
+  const resetAll = async () => {
     if (!confirm('대진표를 초기화하시겠습니까?')) return
-    setMatches([])
-    setCurrentRound(0)
-    setAttendees(attendees.map(a => ({
+
+    const resetAttendees = attendees.map(a => ({
       ...a,
       gamesPlayed: a.isLate ? a.gamesBeforeArrival : 0,
       menDoubles: 0,
       womenDoubles: 0,
       mixedDoubles: 0,
       lastMatchRound: -999,
-    })))
+    }))
+
+    setMatches([])
+    setCurrentRound(0)
+    setAttendees(resetAttendees)
+
+    // 즉시 저장
+    await saveSession(resetAttendees, [], 0)
   }
 
   // 통계
   const maleCount = attendees.filter(a => a.gender === 'male').length
   const femaleCount = attendees.filter(a => a.gender === 'female').length
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-900 -m-4 md:-m-6 p-4 md:p-6 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 size={48} className="animate-spin text-blue-500 mx-auto mb-4" />
+          <p className="text-slate-400">불러오는 중...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 -m-4 md:-m-6 p-4 md:p-6">
       {/* 헤더 */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl md:text-2xl font-bold text-white flex items-center gap-2">
-          <Trophy className="text-yellow-400" size={24} />
-          대진표
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl md:text-2xl font-bold text-white flex items-center gap-2">
+            <Trophy className="text-yellow-400" size={24} />
+            대진표
+          </h1>
+          {/* 저장 상태 */}
+          <div className="flex items-center gap-1 text-xs text-slate-500">
+            {isSaving ? (
+              <>
+                <Loader2 size={12} className="animate-spin" />
+                <span>저장 중...</span>
+              </>
+            ) : lastSaved ? (
+              <>
+                <Save size={12} />
+                <span>저장됨</span>
+              </>
+            ) : null}
+          </div>
+        </div>
         <button
           onClick={() => setShowSettingsModal(true)}
           className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
@@ -386,7 +545,6 @@ export default function MatchesPage() {
                     ${a.isLate ? 'opacity-50' : ''}
                   `}
                 >
-                  {/* 순위 */}
                   <div className="flex flex-col items-center">
                     <button
                       onClick={() => moveRank(a.id, 'up')}
@@ -405,7 +563,6 @@ export default function MatchesPage() {
                     </button>
                   </div>
 
-                  {/* 정보 */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className={`text-sm font-medium ${a.gender === 'male' ? 'text-blue-300' : 'text-pink-300'}`}>
@@ -421,7 +578,6 @@ export default function MatchesPage() {
                     </div>
                   </div>
 
-                  {/* 액션 */}
                   <button
                     onClick={() => toggleLate(a.id)}
                     className={`p-1.5 rounded ${a.isLate ? 'bg-yellow-600/50 text-yellow-300' : 'text-slate-500 hover:text-yellow-400'}`}
@@ -591,7 +747,7 @@ export default function MatchesPage() {
                 <label className="block text-sm font-medium text-slate-300 mb-2">코트 수</label>
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => setCourtCount(Math.max(1, courtCount - 1))}
+                    onClick={() => updateCourtCount(courtCount - 1)}
                     className="p-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg"
                   >
                     <Minus size={18} />
@@ -600,11 +756,11 @@ export default function MatchesPage() {
                     type="number"
                     className="w-20 text-center bg-slate-700 border border-slate-600 text-white rounded-lg py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     value={courtCount}
-                    onChange={(e) => setCourtCount(Math.max(1, Number(e.target.value)))}
+                    onChange={(e) => updateCourtCount(Number(e.target.value))}
                     min={1}
                   />
                   <button
-                    onClick={() => setCourtCount(courtCount + 1)}
+                    onClick={() => updateCourtCount(courtCount + 1)}
                     className="p-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg"
                   >
                     <Plus size={18} />
@@ -686,7 +842,7 @@ export default function MatchesPage() {
                 </div>
               </div>
 
-              {/* 현재 참석자 목록 미리보기 */}
+              {/* 참석자 미리보기 */}
               {attendees.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">
