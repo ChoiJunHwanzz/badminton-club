@@ -395,12 +395,18 @@ export default function MatchesPage() {
         if (availablePlayers.length < 4) continue
       }
 
-      // 게임 수가 적은 사람 우선, 같으면 순위가 낮은 사람(숫자 큰) 우선 (공평한 배분)
+      // 공평한 배분을 위한 정렬:
+      // 1. 게임 수가 적은 사람 우선
+      // 2. 같으면 마지막 경기가 더 오래된 사람 우선
+      // 3. 같으면 랜덤 셔플 (고정 패턴 방지)
       availablePlayers.sort((a, b) => {
         if (a.gamesPlayed !== b.gamesPlayed) {
           return a.gamesPlayed - b.gamesPlayed
         }
-        return b.rank - a.rank // 순위 숫자가 큰(낮은) 사람 우선
+        if (a.lastMatchRound !== b.lastMatchRound) {
+          return a.lastMatchRound - b.lastMatchRound
+        }
+        return Math.random() - 0.5
       })
 
       const males = availablePlayers.filter(p => p.gender === 'male')
