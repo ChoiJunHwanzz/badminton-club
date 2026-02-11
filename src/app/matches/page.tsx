@@ -380,7 +380,13 @@ export default function MatchesPage() {
         if (availablePlayers.length < 4) continue
       }
 
-      availablePlayers.sort((a, b) => a.gamesPlayed - b.gamesPlayed)
+      // 게임 수가 적은 사람 우선, 같으면 순위가 낮은 사람(숫자 큰) 우선 (공평한 배분)
+      availablePlayers.sort((a, b) => {
+        if (a.gamesPlayed !== b.gamesPlayed) {
+          return a.gamesPlayed - b.gamesPlayed
+        }
+        return b.rank - a.rank // 순위 숫자가 큰(낮은) 사람 우선
+      })
 
       const males = availablePlayers.filter(p => p.gender === 'male')
       const females = availablePlayers.filter(p => p.gender === 'female')
