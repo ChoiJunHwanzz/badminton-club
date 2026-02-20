@@ -18,6 +18,9 @@ export type MemberGender = 'male' | 'female'
 // 상태: 활동, 탈퇴, 강퇴
 export type MemberStatus = 'active' | 'left' | 'kicked'
 
+// 페널티 유형: 당일취소, 지각
+export type PenaltyType = 'cancel' | 'late'
+
 export interface Database {
   public: {
     Tables: {
@@ -246,6 +249,41 @@ export interface Database {
           updated_at?: string
         }
       }
+      penalties: {
+        Row: {
+          id: string
+          member_id: string
+          type: PenaltyType
+          date: string
+          after_4pm: boolean
+          fine_paid: boolean
+          note: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          member_id: string
+          type: PenaltyType
+          date: string
+          after_4pm?: boolean
+          fine_paid?: boolean
+          note?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          member_id?: string
+          type?: PenaltyType
+          date?: string
+          after_4pm?: boolean
+          fine_paid?: boolean
+          note?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
       users: {
         Row: {
           id: string
@@ -297,6 +335,7 @@ export interface Database {
       payment_method: 'cash' | 'transfer' | 'card'
       attendance_status: 'present' | 'absent' | 'late'
       match_status: 'scheduled' | 'playing' | 'completed'
+      penalty_type: PenaltyType
     }
   }
 }
@@ -313,3 +352,5 @@ export type Match = Database['public']['Tables']['matches']['Row']
 export type MatchInsert = Database['public']['Tables']['matches']['Insert']
 export type MemberRegistration = Database['public']['Tables']['member_registrations']['Row']
 export type MemberRegistrationInsert = Database['public']['Tables']['member_registrations']['Insert']
+export type Penalty = Database['public']['Tables']['penalties']['Row']
+export type PenaltyInsert = Database['public']['Tables']['penalties']['Insert']

@@ -84,6 +84,8 @@ export default function PaymentsPage() {
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false)
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc')
+  const [showActive, setShowActive] = useState(true)
+  const [showLeft, setShowLeft] = useState(true)
 
   const supabase = createClient()
 
@@ -94,6 +96,8 @@ export default function PaymentsPage() {
     setSearchTerm('')
     setSortField(null)
     setSortOrder('asc')
+    setShowActive(true)
+    setShowLeft(true)
   }
 
   // 정렬
@@ -173,8 +177,10 @@ export default function PaymentsPage() {
         (member.nickname && member.nickname.includes(searchTerm))
       // 납입 상태 필터
       const matchesPayment = paymentFilter === 'all' || member.paymentStatus === paymentFilter
+      // 활동상태 필터
+      const matchesStatus = (showActive && member.status === 'active') || (showLeft && (member.status === 'left' || member.status === 'kicked'))
 
-      return matchesSearch && matchesPayment
+      return matchesSearch && matchesPayment && matchesStatus
     })
     .sort((a, b) => {
       // 사용자가 특정 필드로 정렬 선택한 경우
@@ -332,6 +338,28 @@ export default function PaymentsPage() {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
+          <div className="flex items-center">
+            <button
+              onClick={() => setShowActive(!showActive)}
+              className={`whitespace-nowrap text-xs px-3 py-2 rounded-l-lg border transition-colors ${
+                showActive
+                  ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
+                  : 'bg-white text-gray-400 border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              활동
+            </button>
+            <button
+              onClick={() => setShowLeft(!showLeft)}
+              className={`whitespace-nowrap text-xs px-3 py-2 rounded-r-lg border border-l-0 transition-colors ${
+                showLeft
+                  ? 'bg-red-100 text-red-700 border-red-300'
+                  : 'bg-white text-gray-400 border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              탈퇴
+            </button>
+          </div>
           <button
             onClick={handleReset}
             className="hidden md:flex items-center gap-1 px-3 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
@@ -357,7 +385,7 @@ export default function PaymentsPage() {
         {loading ? (
           <div className="p-8 text-center text-gray-500">로딩 중...</div>
         ) : (
-          <div className="table-container overflow-auto max-h-[calc(100vh-320px)] md:max-h-[calc(100vh-380px)]">
+          <div className="table-container overflow-auto h-[400px] md:h-[480px]">
             <table className="table">
               <thead className="sticky top-0 z-10 bg-gray-50">
                 <tr>
@@ -456,6 +484,9 @@ export default function PaymentsPage() {
             </table>
           </div>
         )}
+        <div className="px-4 py-2 text-xs text-gray-500 border-t border-gray-200 bg-gray-50">
+          조회결과: {filteredMembers.length}건{(!showActive || !showLeft) || paymentFilter !== 'all' || searchTerm ? ` / 전체 ${eligibleMembers.length}건` : ''}
+        </div>
       </div>
 
       {/* 도움말 */}

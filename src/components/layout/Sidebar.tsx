@@ -10,6 +10,7 @@ import {
   Trophy,
   LayoutDashboard,
   Settings,
+  AlertTriangle,
   X
 } from 'lucide-react'
 
@@ -17,9 +18,10 @@ const menuItems = [
   { href: '/', label: '대시보드', icon: LayoutDashboard },
   { href: '/members', label: '회원관리', icon: Users },
   { href: '/registrations', label: '신규회원관리', icon: UserPlus },
+  { href: '/penalties', label: '당일취소/지각', icon: AlertTriangle },
   { href: '/payments', label: '회비관리', icon: CreditCard },
   { href: '/meetings', label: '모임관리', icon: Calendar },
-  { href: '/matches', label: '대진표', icon: Trophy },
+  // { href: '/matches', label: '대진표', icon: Trophy },
   { href: '/settings', label: '설정', icon: Settings },
 ]
 
