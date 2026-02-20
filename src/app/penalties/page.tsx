@@ -317,12 +317,12 @@ export default function PenaltiesPage() {
                 {memberSummaries.length === 0 ? (
                   <div className="p-8 text-center text-gray-400 text-sm">해당 데이터가 없습니다.</div>
                 ) : (
-                  <table className="table w-full">
+                  <table className="table w-full table-fixed">
                     <thead className="sticky top-0 z-10 bg-gray-50">
                       <tr>
                         <th className="text-left">이름</th>
-                        <th className="text-center">당일취소</th>
-                        <th className="text-center">지각</th>
+                        <th className="text-center w-16">당일취소</th>
+                        <th className="text-center w-12">지각</th>
                         <th className="w-8"></th>
                       </tr>
                     </thead>
@@ -366,7 +366,7 @@ export default function PenaltiesPage() {
                           {/* 드롭다운 상세 */}
                           {isSelected && (
                             <tr>
-                            <td colSpan={4} className="p-0">
+                            <td colSpan={4} className="p-0 overflow-hidden">
                             <div className="bg-gray-50 border-t border-gray-200 px-3 py-3">
                               <div className="flex items-center justify-between mb-2">
                                 <span className="text-xs font-semibold text-gray-600">{member.name} 상세내역</span>
