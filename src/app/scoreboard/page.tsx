@@ -52,10 +52,6 @@ export default function ScoreboardPage() {
   const [team1Animate, setTeam1Animate] = useState(false)
   const [team2Animate, setTeam2Animate] = useState(false)
 
-  // 세트 종료 모달
-  const [showSetEndModal, setShowSetEndModal] = useState(false)
-  const [pendingSetResult, setPendingSetResult] = useState<SetResult | null>(null)
-
   // Screen Wake Lock
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
 
@@ -64,6 +60,9 @@ export default function ScoreboardPage() {
 
   // 팀 이름 입력 ref
   const editInputRef = useRef<HTMLInputElement>(null)
+
+  // 세트 종료 조건 충족 여부
+  const setWon = isSetWon(team1Score, team2Score)
 
   // Screen Wake Lock 요청
   useEffect(() => {
@@ -109,18 +108,10 @@ export default function ScoreboardPage() {
     }
   }, [editingTeam])
 
-  // 세트 종료 자동 감지
-  useEffect(() => {
-    if (isSetWon(team1Score, team2Score) && !showSetEndModal && !matchWinner) {
-      setPendingSetResult({ team1: team1Score, team2: team2Score })
-      setShowSetEndModal(true)
-    }
-  }, [team1Score, team2Score, showSetEndModal, matchWinner])
-
   // 점수 증가
   const addScore = useCallback((team: 'team1' | 'team2') => {
     if (matchWinner) return
-    if (showSetEndModal) return
+    if (setWon) return
 
     if (team === 'team1') {
       setTeam1Score(prev => prev + 1)
@@ -131,10 +122,10 @@ export default function ScoreboardPage() {
       setTeam2Animate(true)
       setTimeout(() => setTeam2Animate(false), 200)
     }
-  }, [matchWinner, showSetEndModal, team1Score, team2Score])
+  }, [matchWinner, setWon])
 
   // 점수 감소
-  const subtractScore = useCallback((team: 'team1' | 'team2', e: React.MouseEvent | React.TouchEvent) => {
+  const subtractScore = useCallback((team: 'team1' | 'team2', e: React.MouseEvent) => {
     e.stopPropagation()
     if (matchWinner) return
 
@@ -146,13 +137,12 @@ export default function ScoreboardPage() {
   }, [matchWinner])
 
   // 세트 종료 확인
-  const confirmSetEnd = useCallback(() => {
-    if (!pendingSetResult) return
+  const confirmSetEnd = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
 
-    const newResults = [...setResults, pendingSetResult]
+    const result: SetResult = { team1: team1Score, team2: team2Score }
+    const newResults = [...setResults, result]
     setSetResults(newResults)
-    setShowSetEndModal(false)
-    setPendingSetResult(null)
 
     // 매치 승리 체크
     const winner = getMatchWinner(newResults)
@@ -164,27 +154,20 @@ export default function ScoreboardPage() {
       setTeam1Score(0)
       setTeam2Score(0)
     }
-  }, [pendingSetResult, setResults])
-
-  // 세트 종료 취소 (점수 유지하고 계속)
-  const cancelSetEnd = useCallback(() => {
-    setShowSetEndModal(false)
-    setPendingSetResult(null)
-  }, [])
+  }, [team1Score, team2Score, setResults])
 
   // 새 게임
-  const resetGame = useCallback(() => {
+  const resetGame = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
     setTeam1Score(0)
     setTeam2Score(0)
     setCurrentSet(1)
     setSetResults([])
     setMatchWinner(null)
-    setShowSetEndModal(false)
-    setPendingSetResult(null)
   }, [])
 
   // 팀 이름 수정 시작
-  const startEditTeamName = (team: 'team1' | 'team2', e: React.MouseEvent | React.TouchEvent) => {
+  const startEditTeamName = (team: 'team1' | 'team2', e: React.MouseEvent) => {
     e.stopPropagation()
     setEditingTeam(team)
     setEditValue(team === 'team1' ? team1Name : team2Name)
@@ -200,7 +183,8 @@ export default function ScoreboardPage() {
   }
 
   // 닫기
-  const handleClose = () => {
+  const handleClose = (e: React.MouseEvent) => {
+    e.stopPropagation()
     router.back()
   }
 
@@ -208,7 +192,7 @@ export default function ScoreboardPage() {
   const team1SetWins = setResults.filter(s => s.team1 > s.team2).length
   const team2SetWins = setResults.filter(s => s.team2 > s.team1).length
 
-  // 게임 포인트 / 세트 포인트 감지
+  // 게임 포인트 감지
   const isGamePoint = (score: number, opponentScore: number) => {
     if (score >= 24 && score > opponentScore) return true
     return false
@@ -235,69 +219,34 @@ export default function ScoreboardPage() {
         </div>
       )}
 
-      {/* 상단 바 */}
-      <div className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between px-3 py-2 bg-gray-950/80 backdrop-blur-sm">
-        {/* X 닫기 버튼 */}
-        <button
-          onClick={handleClose}
-          className="p-2 text-gray-500 hover:text-white transition-colors rounded-lg hover:bg-gray-800"
-        >
-          <X size={24} />
-        </button>
-
-        {/* 세트 정보 */}
-        <div className="flex items-center gap-3">
-          <span className="text-gray-400 text-sm font-medium">SET {currentSet}</span>
-          <div className="flex items-center gap-1.5">
-            {[1, 2, 3].map((setNum) => {
-              const result = setResults[setNum - 1]
-              const isCurrentSet = setNum === currentSet && !matchWinner
-              let dotColor = 'bg-gray-700' // 미진행
-              if (result) {
-                dotColor = result.team1 > result.team2 ? 'bg-blue-500' : 'bg-red-500'
-              } else if (isCurrentSet) {
-                dotColor = 'bg-yellow-500 animate-pulse'
-              }
-              return (
-                <div key={setNum} className="flex flex-col items-center gap-0.5">
-                  <div className={`w-3 h-3 rounded-full ${dotColor}`} />
-                  {result && (
-                    <span className="text-[10px] text-gray-500">{result.team1}-{result.team2}</span>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* 새 게임 버튼 */}
-        <button
-          onClick={resetGame}
-          className="p-2 text-gray-500 hover:text-white transition-colors rounded-lg hover:bg-gray-800"
-          title="새 게임"
-        >
-          <RotateCcw size={20} />
-        </button>
-      </div>
-
-      {/* 메인 스코어보드 영역 */}
-      <div className="flex h-full pt-12">
+      {/* 메인 스코어보드 영역 - 전체 화면 사용 */}
+      <div className="flex h-full">
         {/* Team 1 (Blue) */}
         <div
           className={`
             flex-1 flex flex-col items-center justify-center relative cursor-pointer
             bg-blue-900/50 transition-colors
-            ${!matchWinner && !showSetEndModal ? 'active:bg-blue-900/60' : ''}
-            ${matchWinner === 'team1' ? 'bg-blue-900/50' : ''}
+            ${!matchWinner && !setWon ? 'active:bg-blue-900/70' : ''}
+            ${matchWinner === 'team1' ? 'bg-blue-900/60' : ''}
           `}
           onClick={() => addScore('team1')}
         >
+          {/* X 닫기 버튼 - 좌상단 */}
+          <button
+            onClick={handleClose}
+            className="absolute top-3 left-3 z-10 p-2 text-gray-500 hover:text-white transition-colors rounded-lg hover:bg-black/30"
+          >
+            <X size={22} />
+          </button>
+
           {/* 세트 승수 표시 */}
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 flex gap-1">
-            {Array.from({ length: team1SetWins }).map((_, i) => (
-              <div key={i} className="w-2.5 h-2.5 rounded-full bg-blue-400" />
-            ))}
-          </div>
+          {team1SetWins > 0 && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 flex gap-1.5">
+              {Array.from({ length: team1SetWins }).map((_, i) => (
+                <div key={i} className="w-3 h-3 rounded-full bg-blue-400" />
+              ))}
+            </div>
+          )}
 
           {/* 팀 이름 */}
           {editingTeam === 'team1' ? (
@@ -324,9 +273,10 @@ export default function ScoreboardPage() {
           <div className={`transition-transform duration-200 ${team1Animate ? 'animate-score-pulse' : ''}`}>
             <span
               className={`
-                text-[7rem] md:text-[10rem] lg:text-[12rem] font-black leading-none tabular-nums
+                text-[8rem] md:text-[11rem] lg:text-[13rem] font-black leading-none tabular-nums
                 ${isGamePoint(team1Score, team2Score) ? 'text-yellow-300' : 'text-blue-50'}
                 ${matchWinner === 'team1' ? 'text-yellow-400' : ''}
+                ${setWon ? 'text-blue-200' : ''}
               `}
             >
               {team1Score}
@@ -334,41 +284,47 @@ export default function ScoreboardPage() {
           </div>
 
           {/* 게임 포인트 표시 */}
-          {isGamePoint(team1Score, team2Score) && !matchWinner && (
+          {isGamePoint(team1Score, team2Score) && !matchWinner && !setWon && (
             <span className="text-yellow-400 text-xs font-bold tracking-wider mt-1 animate-pulse">
               GAME POINT
             </span>
           )}
 
-          {/* 마이너스 버튼 */}
-          <button
-            onClick={(e) => subtractScore('team1', e)}
-            onTouchEnd={(e) => subtractScore('team1', e)}
-            className={`
-              absolute bottom-6 left-1/2 -translate-x-1/2
-              flex items-center justify-center w-14 h-14 md:w-16 md:h-16
-              rounded-full bg-gray-800/80 border-2 border-gray-600
-              text-gray-300 hover:text-white hover:border-gray-400
-              active:bg-gray-700 transition-all
-              ${matchWinner ? 'opacity-30 pointer-events-none' : ''}
-            `}
-          >
-            <Minus size={24} />
-          </button>
+          {/* 마이너스 버튼 - 세트 종료 시 숨김 */}
+          {!setWon && !matchWinner && (
+            <button
+              onClick={(e) => subtractScore('team1', e)}
+              className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-full bg-gray-800/80 border-2 border-gray-600 text-gray-300 hover:text-white hover:border-gray-400 active:bg-gray-700 transition-all"
+            >
+              <Minus size={24} />
+            </button>
+          )}
 
           {/* 매치 승리 표시 */}
           {matchWinner === 'team1' && (
-            <div className="absolute bottom-20 left-1/2 -translate-x-1/2 text-yellow-400 font-bold text-2xl tracking-wider">
+            <div className="text-yellow-400 font-bold text-2xl tracking-wider mt-2">
               WIN!
             </div>
           )}
         </div>
 
-        {/* 중앙 구분선 */}
-        <div className="w-[2px] bg-gray-700 relative flex items-center justify-center">
-          <div className="absolute bg-gray-800 border border-gray-600 rounded-full px-2 py-1 text-gray-500 text-xs font-bold">
-            VS
-          </div>
+        {/* 중앙 구분선 + VS + 세트종료 버튼 */}
+        <div className="w-[2px] bg-gray-700 relative flex flex-col items-center justify-center z-10">
+          {/* 새 게임 버튼 - 우상단 근처 */}
+          <button
+            onClick={resetGame}
+            className="absolute top-3 p-2 text-gray-500 hover:text-white transition-colors rounded-lg hover:bg-black/30"
+            title="새 게임"
+          >
+            <RotateCcw size={20} />
+          </button>
+
+          {/* VS 표시 */}
+          {!setWon && (
+            <div className="bg-gray-800 border border-gray-600 rounded-full px-2 py-1 text-gray-500 text-xs font-bold">
+              VS
+            </div>
+          )}
         </div>
 
         {/* Team 2 (Red) */}
@@ -376,17 +332,19 @@ export default function ScoreboardPage() {
           className={`
             flex-1 flex flex-col items-center justify-center relative cursor-pointer
             bg-red-900/50 transition-colors
-            ${!matchWinner && !showSetEndModal ? 'active:bg-red-900/60' : ''}
-            ${matchWinner === 'team2' ? 'bg-red-900/50' : ''}
+            ${!matchWinner && !setWon ? 'active:bg-red-900/70' : ''}
+            ${matchWinner === 'team2' ? 'bg-red-900/60' : ''}
           `}
           onClick={() => addScore('team2')}
         >
           {/* 세트 승수 표시 */}
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 flex gap-1">
-            {Array.from({ length: team2SetWins }).map((_, i) => (
-              <div key={i} className="w-2.5 h-2.5 rounded-full bg-red-400" />
-            ))}
-          </div>
+          {team2SetWins > 0 && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 flex gap-1.5">
+              {Array.from({ length: team2SetWins }).map((_, i) => (
+                <div key={i} className="w-3 h-3 rounded-full bg-red-400" />
+              ))}
+            </div>
+          )}
 
           {/* 팀 이름 */}
           {editingTeam === 'team2' ? (
@@ -413,9 +371,10 @@ export default function ScoreboardPage() {
           <div className={`transition-transform duration-200 ${team2Animate ? 'animate-score-pulse' : ''}`}>
             <span
               className={`
-                text-[7rem] md:text-[10rem] lg:text-[12rem] font-black leading-none tabular-nums
+                text-[8rem] md:text-[11rem] lg:text-[13rem] font-black leading-none tabular-nums
                 ${isGamePoint(team2Score, team1Score) ? 'text-yellow-300' : 'text-red-50'}
                 ${matchWinner === 'team2' ? 'text-yellow-400' : ''}
+                ${setWon ? 'text-red-200' : ''}
               `}
             >
               {team2Score}
@@ -423,31 +382,25 @@ export default function ScoreboardPage() {
           </div>
 
           {/* 게임 포인트 표시 */}
-          {isGamePoint(team2Score, team1Score) && !matchWinner && (
+          {isGamePoint(team2Score, team1Score) && !matchWinner && !setWon && (
             <span className="text-yellow-400 text-xs font-bold tracking-wider mt-1 animate-pulse">
               GAME POINT
             </span>
           )}
 
-          {/* 마이너스 버튼 */}
-          <button
-            onClick={(e) => subtractScore('team2', e)}
-            onTouchEnd={(e) => subtractScore('team2', e)}
-            className={`
-              absolute bottom-6 left-1/2 -translate-x-1/2
-              flex items-center justify-center w-14 h-14 md:w-16 md:h-16
-              rounded-full bg-gray-800/80 border-2 border-gray-600
-              text-gray-300 hover:text-white hover:border-gray-400
-              active:bg-gray-700 transition-all
-              ${matchWinner ? 'opacity-30 pointer-events-none' : ''}
-            `}
-          >
-            <Minus size={24} />
-          </button>
+          {/* 마이너스 버튼 - 세트 종료 시 숨김 */}
+          {!setWon && !matchWinner && (
+            <button
+              onClick={(e) => subtractScore('team2', e)}
+              className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-full bg-gray-800/80 border-2 border-gray-600 text-gray-300 hover:text-white hover:border-gray-400 active:bg-gray-700 transition-all"
+            >
+              <Minus size={24} />
+            </button>
+          )}
 
           {/* 매치 승리 표시 */}
           {matchWinner === 'team2' && (
-            <div className="absolute bottom-20 left-1/2 -translate-x-1/2 text-yellow-400 font-bold text-2xl tracking-wider">
+            <div className="text-yellow-400 font-bold text-2xl tracking-wider mt-2">
               WIN!
             </div>
           )}
@@ -455,67 +408,47 @@ export default function ScoreboardPage() {
       </div>
 
       {/* 세트 종료 모달 */}
-      {showSetEndModal && pendingSetResult && (
-        <div className="absolute inset-0 z-40 bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-gray-700">
-            <h3 className="text-xl font-bold text-white text-center mb-4">
-              세트 {currentSet} 종료!
-            </h3>
-            <div className="flex items-center justify-center gap-4 mb-6">
+      {setWon && !matchWinner && (
+        <div
+          className="absolute inset-0 z-40 bg-black/60 flex items-center justify-center p-4"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-2xl text-center">
+            <p className="text-gray-800 text-lg font-bold mb-1">
+              수고하셨습니다!
+            </p>
+            <div className="flex items-center justify-center gap-3 my-4">
               <div className="text-center">
-                <div className="text-blue-300 text-sm font-medium mb-1">{team1Name}</div>
-                <div className={`text-4xl font-black ${pendingSetResult.team1 > pendingSetResult.team2 ? 'text-yellow-400' : 'text-blue-200'}`}>
-                  {pendingSetResult.team1}
+                <div className="text-blue-600 text-sm font-medium mb-1">{team1Name}</div>
+                <div className={`text-3xl font-black ${team1Score > team2Score ? 'text-blue-600' : 'text-gray-400'}`}>
+                  {team1Score}
                 </div>
               </div>
-              <span className="text-gray-500 text-lg font-bold">:</span>
+              <span className="text-gray-300 text-lg font-bold">:</span>
               <div className="text-center">
-                <div className="text-red-300 text-sm font-medium mb-1">{team2Name}</div>
-                <div className={`text-4xl font-black ${pendingSetResult.team2 > pendingSetResult.team1 ? 'text-yellow-400' : 'text-red-200'}`}>
-                  {pendingSetResult.team2}
+                <div className="text-red-600 text-sm font-medium mb-1">{team2Name}</div>
+                <div className={`text-3xl font-black ${team2Score > team1Score ? 'text-red-600' : 'text-gray-400'}`}>
+                  {team2Score}
                 </div>
               </div>
             </div>
-
-            {/* 매치 종료 여부 미리 안내 */}
-            {(() => {
-              const projectedResults = [...setResults, pendingSetResult]
-              const projectedWinner = getMatchWinner(projectedResults)
-              if (projectedWinner) {
-                return (
-                  <div className="text-center mb-4 py-2 bg-yellow-900/30 rounded-lg border border-yellow-700/50">
-                    <span className="text-yellow-400 font-bold">
-                      {projectedWinner === 'team1' ? team1Name : team2Name} 승리!
-                    </span>
-                  </div>
-                )
-              }
-              return null
-            })()}
-
-            <div className="flex gap-3">
-              <button
-                onClick={cancelSetEnd}
-                className="flex-1 py-3 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-xl font-medium transition-colors"
-              >
-                계속 진행
-              </button>
-              <button
-                onClick={confirmSetEnd}
-                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-medium transition-colors"
-              >
-                세트 종료
-              </button>
-            </div>
+            <button
+              onClick={confirmSetEnd}
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl font-bold text-base transition-colors"
+            >
+              세트 종료
+            </button>
           </div>
         </div>
       )}
 
       {/* 매치 종료 오버레이 */}
       {matchWinner && (
-        <div className="absolute inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
+        <div
+          className="absolute inset-0 z-40 bg-black/50 flex items-center justify-center p-4"
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="bg-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-gray-700 text-center">
-            <div className="text-5xl mb-3">🏆</div>
             <h3 className="text-2xl font-black text-yellow-400 mb-2">
               경기 종료!
             </h3>
