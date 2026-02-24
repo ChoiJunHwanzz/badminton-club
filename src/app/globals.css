@@ -89,6 +89,17 @@ body {
   @apply bg-gray-100 text-gray-800;
 }
 
+/* 스코어보드 점수 애니메이션 */
+@keyframes score-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+.animate-score-pulse {
+  animation: score-pulse 0.2s ease-out;
+}
+
 /* 사이드바 슬라이드 애니메이션 */
 @keyframes slide-in {
   from {

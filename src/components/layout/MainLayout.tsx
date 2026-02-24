@@ -13,6 +13,7 @@ interface MainLayoutProps {
 export default function MainLayout({ children }: MainLayoutProps) {
   const pathname = usePathname()
   const isLoginPage = pathname === '/login'
+  const isFullscreenPage = pathname.startsWith('/scoreboard')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
 
@@ -40,8 +41,8 @@ export default function MainLayout({ children }: MainLayoutProps) {
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen)
   const closeSidebar = () => setSidebarOpen(false)
 
-  // 로그인 페이지는 레이아웃 없이 렌더링
-  if (isLoginPage) {
+  // 로그인/풀스크린 페이지는 레이아웃 없이 렌더링
+  if (isLoginPage || isFullscreenPage) {
     return <>{children}</>
   }
 
