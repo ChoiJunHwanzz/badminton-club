@@ -13,7 +13,8 @@ interface MainLayoutProps {
 export default function MainLayout({ children }: MainLayoutProps) {
   const pathname = usePathname()
   const isLoginPage = pathname === '/login'
-  const isFullscreenPage = pathname.startsWith('/scoreboard')
+  // 공개 페이지(/share/*)와 스코어보드는 레이아웃·인증 없이 렌더링
+  const isFullscreenPage = pathname.startsWith('/scoreboard') || pathname.startsWith('/share')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
 

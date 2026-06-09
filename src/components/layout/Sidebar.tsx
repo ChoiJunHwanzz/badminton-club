@@ -23,6 +23,7 @@ const menuItems = [
   { href: '/payments', label: '회비관리', icon: CreditCard },
   { href: '/meetings', label: '모임관리', icon: Calendar },
   // { href: '/matches', label: '대진표', icon: Trophy },
+  { href: '/tournament', label: '대진/시간표', icon: Trophy },
   { href: '/scoreboard', label: '스코어보드', icon: Target },
   { href: '/settings', label: '설정', icon: Settings },
 ]
