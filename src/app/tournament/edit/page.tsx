@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
+import { getUser } from '@/lib/auth'
 import {
   TournamentGame,
   TimetableBlock,
@@ -43,7 +44,9 @@ export default function TournamentEditPage() {
   const [games, setGames] = useState<TournamentGame[]>([])
   const [teams, setTeams] = useState<Teams>(DEFAULT_TEAMS)
   const [courtCount, setCourtCount] = useState(DEFAULT_COURT_COUNT)
-  const [tab, setTab] = useState<'roster' | 'bracket'>('roster')
+  // 팀별인원 탭은 admin만. manager는 대진표수정만 보임.
+  const [isAdmin] = useState(() => getUser()?.role === 'admin')
+  const [tab, setTab] = useState<'roster' | 'bracket'>(isAdmin ? 'roster' : 'bracket')
   const [loading, setLoading] = useState(true)
   const [columnMissing, setColumnMissing] = useState(false)
   const [tableMissing, setTableMissing] = useState(false)
@@ -240,16 +243,18 @@ export default function TournamentEditPage() {
 
       {/* 탭 */}
       <div className="flex gap-1 border-b border-gray-200">
-        <button
-          onClick={() => setTab('roster')}
-          className={`px-4 py-2.5 text-sm font-semibold flex items-center gap-1.5 border-b-2 -mb-px transition-colors ${
-            tab === 'roster'
-              ? 'border-emerald-600 text-emerald-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          <Users size={16} /> 팀별인원
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => setTab('roster')}
+            className={`px-4 py-2.5 text-sm font-semibold flex items-center gap-1.5 border-b-2 -mb-px transition-colors ${
+              tab === 'roster'
+                ? 'border-emerald-600 text-emerald-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Users size={16} /> 팀별인원
+          </button>
+        )}
         <button
           onClick={() => setTab('bracket')}
           className={`px-4 py-2.5 text-sm font-semibold flex items-center gap-1.5 border-b-2 -mb-px transition-colors ${
@@ -264,7 +269,7 @@ export default function TournamentEditPage() {
 
       {errMsg && <div className="card border-red-300 bg-red-50 text-sm text-red-700">{errMsg}</div>}
 
-      {tab === 'roster' ? (
+      {isAdmin && tab === 'roster' ? (
         <RosterTab
           teams={teams}
           onTeamName={setTeamName}
