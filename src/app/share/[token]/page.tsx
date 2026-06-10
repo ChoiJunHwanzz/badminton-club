@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase'
 import {
   TournamentGame,
   TimetableBlock,
+  Teams,
   DEFAULT_BLOCKS,
   DEFAULT_COURT_COUNT,
 } from '@/lib/tournamentData'
@@ -21,6 +22,7 @@ interface ShareRow {
   court_count: number
   games: TournamentGame[]
   blocks: TimetableBlock[]
+  teams?: Teams | null
 }
 
 export default function SharePage() {
@@ -41,7 +43,7 @@ export default function SharePage() {
     const load = async () => {
       const { data, error } = await supabase
         .from('tournament_schedules')
-        .select('id,title,event_date,court_count,games,blocks')
+        .select('*')
         .eq('share_token', token)
         .single()
       if (!active) return
@@ -128,6 +130,7 @@ export default function SharePage() {
           games={games}
           blocks={row.blocks ?? DEFAULT_BLOCKS}
           courtCount={row.court_count ?? DEFAULT_COURT_COUNT}
+          teams={row.teams}
         />
       </div>
     </div>

@@ -9,6 +9,7 @@ import {
   TimetableBlock,
   GameStatus,
   GameWinner,
+  Teams,
   DEFAULT_GAMES,
   DEFAULT_BLOCKS,
   DEFAULT_TITLE,
@@ -38,6 +39,7 @@ interface TournamentRow {
   court_count: number
   games: TournamentGame[]
   blocks: TimetableBlock[]
+  teams: Teams | null
   status: string
 }
 
@@ -271,6 +273,7 @@ docs/ddl/tournament_schedules.sql
           courtCount={courtCount}
           editable
           conflicts={conflicts}
+          teams={row.teams}
           onReorder={handleReorder}
           onStatusChange={handleStatusChange}
         />

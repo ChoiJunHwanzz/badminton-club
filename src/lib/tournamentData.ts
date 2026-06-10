@@ -162,3 +162,69 @@ export function genShareToken(): string {
   }
   return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
 }
+
+// ===== 팀(마스터 명단) =====
+export interface Team {
+  name: string
+  players: string[]
+}
+export interface Teams {
+  team1: Team // 청팀(team1)
+  team2: Team // 백팀(team2)
+}
+
+// 현재 games로부터 2팀 명단을 추출(마이그레이션용).
+// 각 선수를 다수 출전한 쪽(청/백) 팀에 배정, 등장 순서대로 정렬.
+export function deriveTeamsFromGames(games: TournamentGame[]): Teams {
+  const c1 = new Map<string, number>()
+  const c2 = new Map<string, number>()
+  const order1: string[] = []
+  const order2: string[] = []
+  const seen1 = new Set<string>()
+  const seen2 = new Set<string>()
+  games.forEach((g) => {
+    g.team1.forEach((p) => {
+      c1.set(p, (c1.get(p) ?? 0) + 1)
+      if (!seen1.has(p)) {
+        seen1.add(p)
+        order1.push(p)
+      }
+    })
+    g.team2.forEach((p) => {
+      c2.set(p, (c2.get(p) ?? 0) + 1)
+      if (!seen2.has(p)) {
+        seen2.add(p)
+        order2.push(p)
+      }
+    })
+  })
+  const team1 = order1.filter((p) => (c1.get(p) ?? 0) >= (c2.get(p) ?? 0))
+  const team2 = order2.filter((p) => (c2.get(p) ?? 0) > (c1.get(p) ?? 0))
+  return {
+    team1: { name: '청팀', players: team1 },
+    team2: { name: '백팀', players: team2 },
+  }
+}
+
+export const DEFAULT_TEAMS: Teams = deriveTeamsFromGames(DEFAULT_GAMES)
+
+// 선수 이름 일괄 교체(팀 명단에서 사람이 바뀌면 모든 경기에 전파)
+export function renamePlayerInGames(
+  games: TournamentGame[],
+  oldName: string,
+  newName: string
+): TournamentGame[] {
+  if (!oldName || !newName || oldName === newName) return games
+  const swap = (n: string) => (n === oldName ? newName : n)
+  return games.map((g) => ({
+    ...g,
+    team1: [swap(g.team1[0]), swap(g.team1[1])] as [string, string],
+    team2: [swap(g.team2[0]), swap(g.team2[1])] as [string, string],
+    referee: swap(g.referee),
+  }))
+}
+
+// 모든 선수(청팀+백팀) 목록
+export function allPlayers(teams: Teams): string[] {
+  return [...teams.team1.players, ...teams.team2.players]
+}

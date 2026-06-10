@@ -1,13 +1,15 @@
 'use client'
 
-import { useState } from 'react'
-import { GripVertical, AlertTriangle, Flag, Play, RotateCcw, X } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { GripVertical, AlertTriangle, Flag, Play, RotateCcw, X, BarChart3, ChevronDown, Trophy } from 'lucide-react'
 import {
   TournamentGame,
   TimetableBlock,
   GameStatus,
   GameWinner,
+  Teams,
   slotTime,
+  deriveTeamsFromGames,
   DEFAULT_COURT_COUNT,
 } from '@/lib/tournamentData'
 
@@ -19,8 +21,14 @@ interface TimetableViewProps {
   courtCount?: number
   editable?: boolean
   conflicts?: Set<number>
+  teams?: Teams | null
   onReorder?: (from: number, to: number) => void
   onStatusChange?: (index: number, status: GameStatus, winner: GameWinner) => void
+}
+
+interface PlayerRecord {
+  win: number
+  loss: number
 }
 
 const ROUND_COLOR = [
@@ -40,14 +48,48 @@ export default function TimetableView({
   courtCount = DEFAULT_COURT_COUNT,
   editable = false,
   conflicts,
+  teams,
   onReorder,
   onStatusChange,
 }: TimetableViewProps) {
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [overIndex, setOverIndex] = useState<number | null>(null)
   const [editIndex, setEditIndex] = useState<number | null>(null)
+  const [showIndividual, setShowIndividual] = useState(false)
 
   const playBlocks = blocks.filter((b) => b.kind === 'play')
+
+  // 팀별 점수(승자팀 +1) + 개인 승패 집계
+  const effTeams = useMemo<Teams>(
+    () => (teams && teams.team1 ? teams : deriveTeamsFromGames(games)),
+    [teams, games]
+  )
+  const stats = useMemo(() => {
+    let s1 = 0
+    let s2 = 0
+    const rec = new Map<string, PlayerRecord>()
+    const bump = (name: string, win: boolean) => {
+      const r = rec.get(name) ?? { win: 0, loss: 0 }
+      if (win) r.win += 1
+      else r.loss += 1
+      rec.set(name, r)
+    }
+    games.forEach((g) => {
+      if (g.status !== 'done' || !g.winner) return
+      const winTeam = g.winner === 'team1' ? g.team1 : g.team2
+      const loseTeam = g.winner === 'team1' ? g.team2 : g.team1
+      if (g.winner === 'team1') s1 += 1
+      else s2 += 1
+      winTeam.forEach((p) => bump(p, true))
+      loseTeam.forEach((p) => bump(p, false))
+    })
+    return { s1, s2, rec }
+  }, [games])
+
+  const sortedTeam = (players: string[]): { name: string; rec: PlayerRecord }[] =>
+    [...players]
+      .sort((a, b) => a.localeCompare(b, 'ko'))
+      .map((name) => ({ name, rec: stats.rec.get(name) ?? { win: 0, loss: 0 } }))
 
   const handleDrop = (to: number) => {
     if (dragIndex !== null && dragIndex !== to && onReorder) {
@@ -88,6 +130,57 @@ export default function TimetableView({
           </span>
           {editable && <span className="text-gray-400">· 카드 드래그=순서변경, 클릭=상태변경</span>}
         </div>
+
+        {/* 팀별 스코어 + 개인현황 토글 */}
+        <div className="flex items-center justify-center gap-3 mt-4 flex-wrap">
+          <div className="inline-flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-5 py-2 shadow-sm">
+            <span className="text-sm font-bold text-blue-700">{effTeams.team1.name}</span>
+            <span className="text-2xl font-black text-blue-700 tabular-nums">{stats.s1}</span>
+            <span className="text-gray-300 font-bold">:</span>
+            <span className="text-2xl font-black text-red-600 tabular-nums">{stats.s2}</span>
+            <span className="text-sm font-bold text-red-600">{effTeams.team2.name}</span>
+          </div>
+          <button
+            onClick={() => setShowIndividual((v) => !v)}
+            className="inline-flex items-center gap-1 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg px-3 py-2 transition-colors"
+          >
+            <BarChart3 size={15} />
+            개인현황보기
+            <ChevronDown size={15} className={`transition-transform ${showIndividual ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+
+        {/* 개인별 승패 (팀별 좌/우, 이름순) */}
+        {showIndividual && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3 text-left">
+            {([
+              { team: effTeams.team1, accent: 'blue' as const },
+              { team: effTeams.team2, accent: 'red' as const },
+            ]).map(({ team, accent }) => (
+              <div key={team.name} className="border border-gray-200 rounded-xl overflow-hidden">
+                <div
+                  className={`px-3 py-2 text-sm font-bold ${
+                    accent === 'blue' ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-600'
+                  }`}
+                >
+                  {team.name}
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {sortedTeam(team.players).map(({ name, rec }) => (
+                    <div key={name} className="flex items-center justify-between px-3 py-1.5 text-sm">
+                      <span className="text-gray-700">{name}</span>
+                      <span className="tabular-nums text-xs">
+                        <span className="font-bold text-emerald-600">{rec.win}승</span>
+                        <span className="text-gray-300 mx-1">·</span>
+                        <span className="font-bold text-gray-400">{rec.loss}패</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 코트별 대진 */}
@@ -189,11 +282,13 @@ export default function TimetableView({
                               </div>
                             )}
 
-                            <div className={`text-[13px] font-bold leading-tight ${team1Cls}`}>
+                            <div className={`text-[13px] font-bold leading-tight flex items-center justify-center gap-1 ${team1Cls}`}>
+                              {team1Win && <Trophy size={12} className="text-amber-500" />}
                               {game.team1[0]} · {game.team1[1]}
                             </div>
                             <div className="text-[10px] text-violet-400 font-bold my-0.5">VS</div>
-                            <div className={`text-[13px] font-bold leading-tight ${team2Cls}`}>
+                            <div className={`text-[13px] font-bold leading-tight flex items-center justify-center gap-1 ${team2Cls}`}>
+                              {team2Win && <Trophy size={12} className="text-amber-500" />}
                               {game.team2[0]} · {game.team2[1]}
                             </div>
                             <div
