@@ -20,7 +20,8 @@ import {
   computeConflicts,
   genShareToken,
 } from '@/lib/tournamentData'
-import { Users, Grid3x3, Check, Loader2, AlertTriangle } from 'lucide-react'
+import { exportBracketPdf } from '@/lib/exportBracket'
+import { Users, Grid3x3, Check, Loader2, AlertTriangle, FileDown } from 'lucide-react'
 
 interface EditRow {
   id: string
@@ -230,15 +231,23 @@ export default function TournamentEditPage() {
             마스터 데이터(팀 명단·대진)를 수정하면 시간표/공유 화면에 그대로 반영됩니다.
           </p>
         </div>
-        {saving ? (
-          <span className="text-xs text-gray-400 flex items-center gap-1 shrink-0">
-            <Loader2 className="animate-spin" size={12} /> 저장 중
-          </span>
-        ) : savedAt ? (
-          <span className="text-xs text-emerald-600 flex items-center gap-1 shrink-0">
-            <Check size={12} /> 저장됨
-          </span>
-        ) : null}
+        <div className="flex items-center gap-2 shrink-0">
+          {saving ? (
+            <span className="text-xs text-gray-400 flex items-center gap-1">
+              <Loader2 className="animate-spin" size={12} /> 저장 중
+            </span>
+          ) : savedAt ? (
+            <span className="text-xs text-emerald-600 flex items-center gap-1">
+              <Check size={12} /> 저장됨
+            </span>
+          ) : null}
+          <button
+            onClick={() => exportBracketPdf(games, teams, DEFAULT_TITLE, courtCount)}
+            className="btn btn-secondary text-sm flex items-center gap-1"
+          >
+            <FileDown size={14} /> PDF
+          </button>
+        </div>
       </div>
 
       {/* 탭 */}

@@ -19,7 +19,8 @@ import {
   genShareToken,
 } from '@/lib/tournamentData'
 import TimetableView from '@/components/tournament/TimetableView'
-import { Copy, Check, ExternalLink, AlertTriangle, RotateCcw, Loader2 } from 'lucide-react'
+import { exportBracketPdf } from '@/lib/exportBracket'
+import { Copy, Check, ExternalLink, AlertTriangle, RotateCcw, Loader2, FileDown } from 'lucide-react'
 
 // 클라이언트 origin (SSR='' → 하이드레이션 안전, setState-in-effect 회피)
 const subscribeNoop = () => () => {}
@@ -219,6 +220,12 @@ docs/ddl/tournament_schedules.sql
               <Check size={12} /> 저장됨
             </span>
           ) : null}
+          <button
+            onClick={() => exportBracketPdf(games, row?.teams, row?.title, courtCount)}
+            className="btn btn-secondary text-sm flex items-center gap-1"
+          >
+            <FileDown size={14} /> PDF
+          </button>
           <button onClick={handleReset} className="btn btn-secondary text-sm flex items-center gap-1">
             <RotateCcw size={14} /> 기본순서
           </button>
